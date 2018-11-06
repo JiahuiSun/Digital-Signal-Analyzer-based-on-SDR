@@ -1,0 +1,105 @@
+%*****************初始化******************
+%****************FM调制*******************
+dt=0.001;                                   %设定时间步长
+t=0:dt:1.5;                    	           %产生时间向量
+am=5;                                      %设定调制信号幅度
+fm=5;                                      %设定调制信号频率
+mt=am*cos(2*pi*fm*t);                        %生成调制信号
+fc=50;                                      %设定载波频率
+ct=cos(2*pi*fc*t);                             %生成载波
+kf=10;                                      %设定调频指数
+int_mt(1)=0;
+for i=1:length(t)-1  
+    int_mt(i+1)=int_mt(i)+mt(i)*dt;               %求信号m(t)的积分
+end                                          %调制，产生已调信号
+sfm=am*cos(2*pi*fc*t+2*pi*kf*int_mt);            %调制信号
+%*****************************************
+%****************FM解调*******************
+for i=1:length(t)-1                             %接受信号通过微分器处理
+    diff_nsfm(i)=(sfm(i+1)-sfm(i))./dt;
+end
+diff_nsfmn = abs(hilbert(diff_nsfm));  %hilbert变换，求绝对值得到瞬时幅度（包络检波）
+zero=(max(diff_nsfmn)-min(diff_nsfmn))/2;
+diff_nsfmn1=diff_nsfmn-zero;
+%*****************************************
+%·*·*·*·*·*·*·*·*·*·*·*·*·*·*·*·
+%**************时域到频域转换**************
+ts=0.001;                                     %抽样间隔
+fs=1/ts;                                      %抽样频率
+df=0.25;                                      %所需的频率分辨率，用在求傅里叶变换　　　　　　　　　　　　　　　　　　　　　%时，它表示FFT的最小频率间隔
+                                              %*****对调制信号m(t)求傅里叶变换*****
+m=am*cos(2*pi*fm*t);                          %原调信号
+fs=1/ts;
+if nargin==2
+    n1=0;
+else
+    n1=fs/df;
+end
+n2=length(m);
+n=2^(max(nextpow2(n1),nextpow2(n2)));
+M=fft(m,n);
+m=[m,zeros(1,n-n2)];
+df1=fs/n;                                   %以上程序是对调制后的信号u求傅里变换
+M=M/fs;                                   %缩放，便于在频铺图上整体观察
+f=[0:df1:df1*(length(m)-1)]-fs/2;                %时间向量对应的频率向量
+
+%************对已调信号u求傅里变换**********
+fs=1/ts;
+if nargin==2
+    n1=0;
+else
+    n1=fs/df;
+end
+n2=length(sfm);
+n=2^(max(nextpow2(n1),nextpow2(n2)));
+U=fft(sfm,n);
+u=[sfm,zeros(1,n-n2)];
+df1=fs/n;                                   %以上是对已调信号u求傅里变换
+U=U/fs;                                    %缩放
+%******************************************
+%*****************************************
+%·*·*·*·*·*·*·*·*·*·*·*·*·*·*·*·
+%***************显示程序******************
+%**************figure(1)******************
+figure(1)
+subplot(3,1,1);plot(t,mt);		                 %绘制调制信号的时域图
+xlabel('时间t');
+title('调制信号的时域图');
+subplot(3,1,2);plot(t,ct);             		  %绘制载波的时域图
+xlabel('时间t');
+title('载波的时域图');
+subplot(3,1,3);
+plot(t,sfm);				                  %绘制已调信号的时域图
+xlabel('时间t');
+title('已调信号的时域图');
+%******************************************
+%************figure(2)*********************
+figure(2)
+subplot(2,1,1)
+plot(f,abs(fftshift(M)))                        %fftshift:将FFT中的DC分量移到频谱中心
+xlabel('频率f')
+title('原调制信号的频谱图')
+subplot(2,1,2)
+plot(f,abs(fftshift(U)))
+xlabel('频率f')
+title('已调信号的频谱图')
+%******************************************
+%**************figure(3)******************
+figure(3)
+subplot(3,1,1);plot(t,mt);		                  %绘制调制信号的时域图
+xlabel('时间t');
+title('调制信号的时域图');
+subplot(3,1,2);plot(t,sfm);		              %绘制已调信号的时域图
+xlabel('时间t');
+title('无噪声条件下已调信号的时域图');
+nsfm=sfm;                              
+for i=1:length(t)-1                           %接受信号通过微分器处理
+    diff_nsfm(i)=(nsfm(i+1)-nsfm(i))./dt;
+end
+diff_nsfmn = abs(hilbert(diff_nsfm));     %hilbert变换，求绝对值得到瞬时幅度（包络检波）
+zero=(max(diff_nsfmn)-min(diff_nsfmn))/2;
+diff_nsfmn1=diff_nsfmn-zero;
+subplot(3,1,3);                             %绘制无噪声条件下解调信号的时域图
+plot((1:length(diff_nsfmn1))./1000,diff_nsfmn1./400,'r');
+xlabel('时间t');                          
+title('无噪声条件下解调信号的时域图');

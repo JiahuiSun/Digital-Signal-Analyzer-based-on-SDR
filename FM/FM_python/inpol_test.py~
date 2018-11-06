@@ -1,0 +1,44 @@
+import numpy as np
+from scipy import signal
+import wave
+import pyaudio
+def Resample(input_signal,src_fs,tar_fs):
+    dtype = input_signal.dtype
+    audio_len = len(input_signal)
+    audio_time_max = 1.0*(audio_len-1) / src_fs
+    src_time = 1.0 * np.linspace(0,audio_len,audio_len) / src_fs
+    tar_time = 1.0 * np.linspace(0,np.int(audio_time_max*tar_fs),np.int(audio_time_max*tar_fs)) / tar_fs
+    output_signal = np.interp(tar_time,src_time,input_signal).astype(dtype)
+    return output_signal
+
+def playSound(audio_data_short, framerate=16000, channels=1):
+    preply = pyaudio.PyAudio()
+    # 播放声音
+    streamreply = preply.open(format=pyaudio.paInt16,
+                              channels=channels,
+                              rate=framerate,
+                              output=True)
+    data = audio_data_short.tostring()
+    streamreply.write(data)
+    streamreply.close()
+    preply.terminate()
+
+wave_file = '/home/sjh/Desktop/FM/1.wav'
+audio_file = wave.open(wave_file, 'rb')
+audio_data = audio_file.readframes(audio_file.getnframes())
+audio_data_short = np.fromstring(audio_data, np.short)
+src_fs = audio_file.getframerate()
+src_chanels = audio_file.getnchannels()
+
+tar_fs = np.int(src_fs*10)
+
+#playSound(audio_data_short,framerate=src_fs)
+
+audio_data_short0 = Resample(audio_data_short,src_fs,tar_fs)
+print len(audio_data_short),audio_data_short
+print len(audio_data_short0),audio_data_short0
+audiodata=signal.decimate(audio_data_short0,10,ftype='fir')
+#audiodata=signal.decimate(audiodata,10,ftype='fir')
+#print len(audiodata),audiodata
+playSound(audiodata,framerate=tar_fs/10)
+#playSound(audio_data_short0,framerate=tar_fs)

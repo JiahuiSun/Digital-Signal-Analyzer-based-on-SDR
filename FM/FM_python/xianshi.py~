@@ -1,0 +1,25 @@
+#画出信号的时域和频域波形
+#signal_input为输入信号，framerate为采样频率，axis为纵轴名标号，title为信号名
+
+import numpy as np
+import wave
+import matplotlib.pyplot as plt
+
+def tfplot(signal_input,framerate,axis,title):
+    t = np.linspace(0,(len(signal_input)-1)/framerate,len(signal_input));#设定时间范围
+    f = np.linspace(-framerate/2,framerate/2,len(signal_input));            #设定频率范围
+    signal_fft = np.fft.fft(signal_input)
+
+    plt.figure
+    #时域波形
+    plt.subplot(2,1,1)
+    plt.plot(t,signal_input)
+    plt.xlabel('t[s]')
+    plt.ylabel(name)
+    plt.title(plot_title)
+
+    #频域波形
+    plt.subplot(2,1,2)
+    plt.plot(f,np.fft.fftshift(abs(signal_fft)))
+    plt.xlabel('f[Hz]')
+    plt.ylabel(name)

@@ -1,0 +1,104 @@
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy import fftpack
+from scipy import signal
+import pyaudio
+import wave
+import Queue
+
+#open a .wav file
+filepath="/home/sjh/Desktop/FM/1.wav"
+wf = wave.open(filepath,'rb')
+
+#get the parameters and turn into array
+params = wf.getparams()
+nchannels,samplewidth,framerate,nframes = params[:4]
+data = wf.readframes(nframes)
+raw_data = np.fromstring(data,dtype=np.short)
+
+'''
+#play the audio
+wf2 = wave.open(filepath,'rb')
+chunk = 1024
+p = pyaudio.PyAudio()
+stream = p.open(format = p.get_format_from_width(samplewidth),
+                channels = nchannels,
+                rate = framerate,
+                output = True)
+data = wf2.readframes(chunk)
+while data != '':
+      stream.write(data)
+      data = wf2.readframes(chunk)
+stream.close() 
+p.terminate()
+wf2.close()
+'''
+
+#modulation
+sig_int = np.cumsum(raw_data) / float(framerate)#求小面积再求和
+m=3.1
+fc=3000
+t = np.arange(0, nframes) * (1.0 / framerate)
+sig_mod=np.cos(m*sig_int+2*np.pi*t*fc)+1j*np.sin(m*sig_int+2*np.pi*t*fc)
+
+#demodulation
+angle_data=np.angle(sig_mod)
+audio=np.diff(angle_data)
+audiodata=np.unwrap(audio)#求2*pi的补数
+#抽取
+DOWN_FACTOR = 2
+audiodata=signal.decimate(audiodata,DOWN_FACTOR,ftype='fir')
+audiodata=audiodata*1e4
+
+#Draw time Domain and frequency domain
+f = np.linspace(-framerate/2,framerate/2,len(audiodata));
+
+plta = plt.subplot(3,2,1)
+plta.set_title("Input")
+plt.plot(raw_data)
+
+raw_data_fft = np.fft.fftshift(abs(np.fft.fft(raw_data)))
+pltb = plt.subplot(3,2,2)
+pltb.set_title("input_fre")
+plt.plot(raw_data_fft)
+
+pltc = plt.subplot(3,2,3)
+pltc.set_title("After Mod Real")
+plt.plot(sig_mod.real)
+
+pltd = plt.subplot(3,2,4)
+pltd.set_title("After Mod Imag")
+plt.plot(sig_mod.imag)
+
+plte = plt.subplot(3,2,5)
+plte.set_title("demod")
+plt.plot(audiodata)
+
+audiodata_fft = np.fft.fftshift(abs(np.fft.fft(audiodata)))
+pltf = plt.subplot(3,2,6)
+pltf.set_title("demod_fre")
+plt.plot(audiodata_fft)
+
+plt.show()
+
+'''# write .wav file
+f = wave.open(r"FM.wav", "wb")
+#Configure channels,quantization bits and the sampling frequency
+f.setnchannels(nchannels)
+f.setsampwidth(samplewidth)
+f.setframerate(framerate)
+f.writeframes(audiodata.astype(np.dtype('<i2')).tostring())
+f.close()
+'''
+#play audio
+p2 = pyaudio.PyAudio()
+stream2 = p2.open(format = p2.get_format_from_width(samplewidth),
+                channels = nchannels,
+                rate = framerate/DOWN_FACTOR,
+                output = True)
+#i2相当于int16, '<'意思是字节顺序为小端，最小有效字节存储在最小地址中
+#astype转换数据类型并且不改变数组长度
+data2 = audiodata.astype(np.dtype('<i2')).tostring()
+stream2.write(data2)
+stream2.close() 
+p2.terminate()

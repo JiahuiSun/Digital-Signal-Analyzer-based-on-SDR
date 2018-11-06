@@ -1,0 +1,17 @@
+####################播放音频#########################
+def sound(nchannels,samplewidth,framerate,nframes):
+    p = pyaudio.PyAudio()
+    # 打开声音输出流
+    stream=p.open(format = samplewidth,
+                channels = nchannels,
+                rate = framerate,
+                output = True)
+
+    # 写声音输出流进行播放
+    while True:
+        data = wf.readframes(nframes)
+        if data == "": break
+        stream.write(data)
+
+    stream.close()
+    p.terminate()

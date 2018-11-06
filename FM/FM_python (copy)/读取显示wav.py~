@@ -1,0 +1,37 @@
+# -*- coding: utf-8 -*-
+import numpy as np
+import wave
+import matplotlib.pyplot as plt
+import pyaudio
+
+f = wave.open(filepath,'rb')
+
+#读取音频信息
+#声道数,量化位数,采样频率,采样点数
+params = wf.getparams()
+nchannels,samplewidth,framerate,nframes = params[:4]
+
+#播放音频
+p = pyaudio.PyAudio()
+stream = p.open(format = p.get_format_from_width(samplewidth),
+                channels = nchannels,
+                rate = framerate,
+                output = True)
+data = wf.readframes(nframes)
+ 
+stream.write(data)
+wave_data = np.fromstring(data,dtype=np.int16)
+stream.close()
+p.terminate()
+wf.close()
+
+#显示音频  
+#将波形数据转换为数组,需要根据声道数和量化单位，将读取的二进制数据转换为一个可以计算的数组
+time = np.arange(0,nframes)*(1.0/framerate)
+
+#绘制波形
+plt.plot(time,wave_data)
+plt.xlabel("times")
+plt.title("singel channel wave_data")
+plt.grid('on')
+plt.show()

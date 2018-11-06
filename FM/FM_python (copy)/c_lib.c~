@@ -1,0 +1,31 @@
+#include <stdio.h>
+#include <tgmath.h>
+#include <string.h>
+#include <malloc.h>
+#include <stdlib.h>
+
+int CSM_data_combiner(short *PS_in_data_real_part, short *PS_in_data_imag_part, short *PS_out_data_combined, int I_info_len)
+{
+	int i;
+
+	for(i=0; i<I_info_len; i++)
+	{
+		PS_out_data_combined[2*i] = PS_in_data_real_part[i];
+		PS_out_data_combined[2*i + 1] = PS_in_data_imag_part[i];
+	}
+
+	return 0;
+}
+
+int CSM_data_separater(short *PS_in_data_combined, double *PD_out_data_real_part, double *PD_out_data_imag_part, int I_info_len)
+{
+	int i;
+
+	for(i=0; i<I_info_len; i++)
+	{
+		PD_out_data_real_part[i] = (double)PS_in_data_combined[2*i];
+		PD_out_data_imag_part[i] = (double)PS_in_data_combined[2*i+1];
+	}
+
+	return 0;
+}
