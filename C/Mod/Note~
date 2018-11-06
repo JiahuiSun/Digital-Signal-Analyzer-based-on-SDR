@@ -1,0 +1,7 @@
+1. Air_mid_shft_cor_sig
+   change I_group_array[5] into I_group, since only I_group_array[0] is used.
+2. airfreq_est
+   remove input parameter frame_sig_len, which should be the same as rx_uw_sig_len
+   In the structure: change int group_array[AIRFREQ_EST_GROUP_ARRAY_LEN] to int *group_array
+3. air_mid_chan_equ
+   remove two outputs: *D_sig_val_out and *D_mag_val_out

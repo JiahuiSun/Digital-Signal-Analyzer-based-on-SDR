@@ -1,0 +1,35 @@
+from ctypes import *
+import math, time
+import numpy as np
+from common.param_setting import *
+
+resample_lib = CDLL("./resample_lib.so")
+
+
+
+
+def os_filter_symbol(sig_in_real, sig_in_imag, input_len, sig_out_real, sig_out_imag, Params,State):
+
+    states_row = Params['filter_order']
+    states_col = Params['filter_len']-1
+    outputlen_r = (c_uint*1)()
+    outputlen_i = (c_uint*1)()
+
+    if Params['os_N'] == 1:
+        memmove(sig_out_real, sig_in_real, sizeof(c_double)*input_len)
+        memmove(sig_out_imag, sig_in_imag, sizeof(c_double)*input_len)
+        output_len = input_len
+
+    else:
+        Upsamplefilter_para = Upsamplefilter_para_gen(Params,State)
+
+        result_r = resample_lib.unsamplefilter(sig_in_real, input_len, byref(Upsamplefilter_para), \
+                                               State['filter_states_real'], states_row, states_col, \
+                                               sig_out_real, outputlen_r)
+
+        result_i = resample_lib.unsamplefilter(sig_in_imag, input_len, byref(Upsamplefilter_para), \
+                                               State['filter_states_imag'], states_row, states_col, \
+                                               sig_out_imag, outputlen_i)
+        output_len = outputlen_r[0]
+     
+    return output_len

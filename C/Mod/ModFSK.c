@@ -1,0 +1,57 @@
+#include "modulate.h"
+
+/***********************************************************
+Company Name:
+	Tianjin University;
+Function Name:
+	ModFSK;
+Function Description:
+	对信息序列进行2FSK\4FSK调制;
+Inputs:
+	PI_in_mod			:	待调制信息序列数组指针,PI_in_mod[0]为最高位;
+	freq_set			:	4个频率数据的首地址
+	sample_per_sym		:	每个符号的采样个数
+	PD_out_mod_real_part:	输出调制后实部信息序列数组指针,PD_out_mod_real_part[0]为最高位;
+	I_info_len			:	信息序列数组PI_in_mod长度;
+	I_mod_order			:	调制符： "1"2FSK,"2"4FSK;
+Outputs:
+	返回0:正常;1:信息序列长度错误;
+***********************************************************/
+
+
+int ModFSK(int *PI_in_mod, long int *freq_set, int sample_per_sym, double *PD_out_mod_real_part,int I_info_len,int I_mod_order)
+{
+	int i,j,I_sym_idx;
+	
+	
+	/*如果长度不正确*/
+	if (I_mod_order == 2 && I_info_len%2 != 0) 
+	{
+		return 1;
+	}
+	/*长度正确*/
+	else
+	{
+		if(I_mod_order == 1)
+		{	
+		
+			for(i=0; i<I_info_len; i++)
+			{	printf("%d,%l", i*sample_per_sym*sizeof(double), freq_set[PI_in_mod[i]]);
+				memcpy(PD_out_mod_real_part+i*sample_per_sym*sizeof(double),(double *)freq_set[PI_in_mod[i]],sample_per_sym*sizeof(double));
+				
+			}
+		
+		}
+		else
+		{
+			for(i=0,j=0; i<I_info_len; i+=2,j++)
+			{
+				I_sym_idx = (PI_in_mod[i]<<1) + PI_in_mod[i+1];
+				memcpy(PD_out_mod_real_part+j*sample_per_sym*sizeof(double),(double *)freq_set[PI_in_mod[I_sym_idx]],sample_per_sym*sizeof(double));
+			}
+			
+		}
+
+		return 0;
+	}
+}

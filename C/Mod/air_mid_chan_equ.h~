@@ -1,0 +1,31 @@
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
+#include "type_CSM.h"
+
+//宏定义
+#define AIR_MID_CHAN_EQU_CAND_SIG_LEN	1047   	// >= I_seg_len //420
+#define AIR_MID_CHAN_EQU_POW_NUM		10	  	//I_pow_num的最大值
+#define	FLASE							0
+#define DOUBLE_PI						3.141592653589793  /* pi */
+/**************************************************************
+						结构体定义
+**************************************************************/
+typedef struct tag_Air_mid_chan_equ_para
+{
+	int		I_cfo_seg_num;
+	int		I_UW_len;
+	int		I_seg_len;
+	int		I_mes_syms_len;
+	int		I_pow_num;
+	int		I_bitspersym;
+	d_type	D_cfo_est;
+	d_type	D_cfo_alpha;
+	d_type	D_ang_est;
+	d_type  D_fuz_th;
+}Air_mid_chan_equ_para;	
+
+/*信道估计*/
+//int Air_mid_chan_equ (d_type D_sync_frame_real_part[],d_type D_sync_frame_imag_part[],int I_sync_frame_len,Air_mid_chan_equ_para *P_Air_mid_chan_equ_para,d_type D_sync_sig_real_part_out[],d_type D_sync_sig_imag_part_out[],int *I_sync_sig_out_len,d_type *D_cfo_est_out,d_type *D_sig_val_out,d_type *D_mag_val_out);
+
+int Air_mid_chan_equ (d_type D_sync_frame_real_part[],d_type D_sync_frame_imag_part[],int I_sync_frame_len,Air_mid_chan_equ_para *P_Air_mid_chan_equ_para,d_type D_sync_sig_real_part_out[],d_type D_sync_sig_imag_part_out[],int *I_sync_sig_out_len,d_type *D_cfo_est_out, int *fuz_flag);

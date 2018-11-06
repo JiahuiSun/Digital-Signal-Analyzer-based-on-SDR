@@ -1,0 +1,25 @@
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
+#include "type_CSM.h"
+
+//宏定义
+#define AIR_MID_SHFT_COR_SIG_UW_LEN			256 //I_UW_len的最大值， D_rx_uw_sig的长度
+#define AIR_MID_SHFT_COR_SIG_RSP_ROW		9000  //二维数组D_rsp的行  >= I_group_array[]中的最大值
+#define AIR_MID_SHFT_COR_SIG_RSP_COL		32  //二维数组D_rsp的列  >= I_UW_len /（I_group_array[]中的最小值）
+
+/**************************************************************
+						结构体定义
+**************************************************************/
+typedef struct tag_Air_mid_shft_cor_sig
+{
+	int		I_UW_len;
+	int		I_rx_os;
+	int		I_group; 
+}Air_mid_shft_cor_sig_para;	
+
+/*频偏纠正*/
+int Air_mid_shft_cor_sig (d_type D_rx_uw_sig_real_part[],d_type D_rx_uw_sig_imag_part[],d_type D_mf_sig_real_part[],d_type D_mf_sig_imag_part[],int offset,int I_mf_sig_len,Air_mid_shft_cor_sig_para *P_Air_mid_shft_cor_sig_para,d_type D_sum_rsp_out_real_part[][AIR_MID_SHFT_COR_SIG_RSP_COL],d_type D_sum_rsp_out_imag_part[][AIR_MID_SHFT_COR_SIG_RSP_COL],d_type D_sum_abs_out[]);
+
+int Air_mid_shft_cor_sig2 (d_type D_rx_uw_sig_real_part[],d_type D_rx_uw_sig_imag_part[],d_type D_mf_sig_real_part[],d_type D_mf_sig_imag_part[],int I_mf_sig_len,Air_mid_shft_cor_sig_para *P_Air_mid_shft_cor_sig_para,d_type D_sum_rsp_out_real_part[][2],d_type D_sum_rsp_out_imag_part[][2],d_type D_sum_abs_out[]);
+	

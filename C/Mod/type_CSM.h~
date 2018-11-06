@@ -1,0 +1,158 @@
+#include <stdio.h>
+//#include <math.h>
+#include <tgmath.h>
+#include <string.h>
+#include <malloc.h>
+#include <stdlib.h>
+
+#ifndef _TYPE_CSM_H
+#define _TYPE_CSM_H
+/**************************************************************
+						宏定义，结构体定义
+**************************************************************/
+
+/* change from double to float */
+//#define d_type double
+#define d_type float
+
+/*频偏估计*/
+#define Re_com_conj_mul(a,b,c,d)  ((a)*(c) + (b)*(d))
+#define Im_com_conj_mul(a,b,c,d)  ((b)*(c) - (a)*(d))
+#define Re_cpl_sqr(a,b)		((a)*(a) - (b)*(b))
+#define Im_cpl_sqr(a,b)		(2.0*(a)*(b))
+#define sqrt2_div_2			(sqrt(2)/2)
+
+/*时间同步函数*/
+#define Re_cpl_mul(a,b,c,d) ((a)*(c) - (b)*(d)) /* 复乘结果的 实部*/
+#define Im_cpl_mul(a,b,c,d)	((b)*(c) + (a)*(d)) /* 复乘结果的 虚部*/
+#define my_ABS(a,b)		sqrt((a)*(a) + (b)*(b))
+#define my_sqr(a,b)		((a)*(a) + (b)*(b))
+
+/* BACH输出长度15*121 */
+#define BACH_OUT_INFO_LEN 1815
+#define BACH_IN_INFO_LEN 9
+
+/*convlutional*/
+#define MAXLOG 1e7
+
+/*conv_enc*/
+#define CSM_CONV_ENC_CONSTRAINT_LEN 9
+
+/*FCCH*/
+#define CALC_SQR(x) ((x)*(x)) 
+#define SQRT_2	1.414213562373095
+#define FCCH_BASIC_RATE	16000
+#define FREQUENCY_STANDARD 1920000
+#define DOUBLE_PI	3.141592653589793
+
+/*turbo译码*/
+#define NORMALIZE_PERIOD 1
+#define EPS 1.e-15
+/*FCCH接收*/
+#define FCCH_SLOT_NUM 5
+#define FCCH_SUM_PEAK_NUM 3 /*基数*/
+
+/*纠频偏correct_freq*/
+#define I_ds_sig_len_MAX 5000 /*输入序列最大长度*/
+
+
+/*复数结构体*/
+typedef struct tag_Double_Complex
+{
+	d_type real_part;
+	d_type imag_part;
+
+}Double_Complex;
+
+/*发送匹配滤波器函数参数结构体*/
+typedef struct tag_Tx_Match_Filter_Para
+{
+	d_type	*PD_filter_coef;
+	int		I_filter_coef_len;
+	d_type	D_power_factor;
+
+}Tx_Match_Filter_Para;
+
+/*内插函数参数结构体*/
+typedef struct tag_Interp_Para
+{
+	int		I_interp_multiple;
+	int		B_truncate;
+	int		*PI_out_info_len;
+
+}Interp_Para;
+
+typedef struct tag_Sync_Time_Para
+{
+	char	PCH_mod_type[8];
+	char	PCH_NT_mod_type_all[9][8];
+	int		I_Rx_ov;
+	int		I_NT_Rx_unicode_len;
+	int		*PI_NT_Rx_unicode;
+	int		I_NT_Rx_unicode_pos_len;
+	int		*PI_NT_Rx_unicode_pos;
+	int		I_NT_PNB_map;
+	int		I_NT_HSN_left;
+	int		I_RACH3_map;
+	int		I_NT_PNB_seg_num;
+	int		*PI_NT_PNB_mod_seg_tail;
+	int		*PI_NT_kstart;
+	int		*PI_NT_kend;
+	int		I_NT_PNB_DOWN_info1_len;
+	int		I_NT_protect_bit_process;
+	int		I_State_Rx_ideal_pos;
+	int		I_State_half_wind;
+	int		I_State_shft_pos;
+	int		I_State_sample_shft;
+	d_type	D_delta_f;
+	d_type	*PD_NT_unicode_sym_real_part;
+	d_type	*PD_NT_unicode_sym_imag_part;
+	int		B_sync_PNB_method;
+
+
+	int		*PI_State_shft_half_sym;
+	d_type	*PD_Re_h_h;
+	d_type	*PD_Im_h_h;
+	d_type	*PD_pe;
+	int		*PI_po;
+	int		*PI_correct_phase_len;
+	int		*PI_outss_len;
+	d_type	*PD_Re_correct_phase;
+	d_type	*PD_Im_correct_phase;
+
+}Sync_Time_Para;
+
+typedef struct tag_Cfo_Est_Para
+{
+	char	PCH_NT_mod_type[8];
+	int		B_Params_cfo_est_method;
+	int		B_State_Rx_change_flag;
+	int		I_cfoest_interframe;
+	int		*PI_NT_Rx_unicode;
+	int		*PI_NT_Rx_unicode_pos;
+	int		I_NT_Rx_unicode_pos_len;
+	int		I_NT_Rx_unicode_len;
+	int		I_NT_Rx_ideal_pos;
+	int		I_basic_samplePerFrame;
+	int		*PI_Params_NT_Rx_unicode_numpergroup;
+	int		I_Params_NT_Rx_unicode_numpergroup_len;
+	d_type	*PD_NT_Rx_unicode_GI;
+	int		I_NT_Rx_unicode_GI_len;
+	d_type	D_Params_ang_max;
+
+	d_type	*PD_State_sig_cfo_real_part;
+	d_type	*PD_State_sig_cfo_imag_part;
+	d_type	*PD_ofre_off;
+
+}Cfo_Est_Para;
+
+
+/*纠频偏状态结构体*/
+typedef struct tag_Cor_Freq_Stat
+{
+	char	C_sync_state;
+	d_type	sync_phase;
+	d_type  cfo_est;
+}Cor_Freq_Stat;
+
+#endif

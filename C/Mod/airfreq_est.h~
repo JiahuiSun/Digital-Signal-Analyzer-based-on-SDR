@@ -1,0 +1,23 @@
+#include <stdio.h>
+#include <math.h>
+#include <string.h>
+#include "type_CSM.h"
+
+#define AIRFREQ_EST_GROUP_ARRAY_LEN 5     
+#define AIRFREQ_EST_FRAME_SIG_LEN 192
+#define AIRFREQ_EST_RX_UW_SIG_LEN 192
+
+/**************************************************************
+						结构体定义
+**************************************************************/
+
+typedef struct tag_Airfreq_est_Para
+{
+	//int group_array[AIRFREQ_EST_GROUP_ARRAY_LEN];
+	int *group_array;
+	int uw_len;
+	double fre_est;
+	double cfo_est_old;
+}Airfreq_est_Para;
+
+int airfreq_est(Airfreq_est_Para *P_airfreq_est_parameter, int group_array_len, double frame_sig_real_part[], double frame_sig_imag_part[], double rx_uw_sig_real_part[], double rx_uw_sig_imag_part[], int rx_uw_sig_len, double *cfo_est);

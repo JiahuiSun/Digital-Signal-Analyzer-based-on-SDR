@@ -1,0 +1,3 @@
+SDR平台与PC通信的网络路由设置知识：
+1、通过ARM配置AD9361，首先启动ARM端socket通信程序；再启动PC端socket通信程序；
+2、PC端登录ARM进行配置

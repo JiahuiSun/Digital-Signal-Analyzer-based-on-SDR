@@ -1,0 +1,128 @@
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	airfreq_est;
+Function Description:
+	
+Inputs:
+	P_airfreq_est_parameter->group_array            : 输入，
+	P_airfreq_est_parameter->uw_len					: 输入，
+	P_airfreq_est_parameter->fre_est				：输入，
+	P_airfreq_est_parameter->cfo_est_old            : 输入，
+	group_array_len									: 输入，
+	frame_sig_real_part								：输入，
+	frame_sig_imag_part								：输入，
+	//frame_sig_len									：输入,
+	rx_uw_sig_real_part								：输入,
+	rx_uw_sig_imag_part								：输入,
+	rx_uw_sig_len									：输入,
+
+	cfo_est											：输出,
+Outputs:
+	返回0：正常
+	返回1：输入信号group_array长度超设定最大值
+	返回2：输入信号frame_sig长度超过设定最大值
+	返回3：输入信号rx_uw_sig长度超过设定最大值
+
+Notes: 
+**************************************************************************/
+
+#include "airfreq_est.h"
+
+int airfreq_est(Airfreq_est_Para *P_airfreq_est_parameter, int group_array_len, double frame_sig_real_part[], double frame_sig_imag_part[], double rx_uw_sig_real_part[], double rx_uw_sig_imag_part[], int rx_uw_sig_len, double *cfo_est)
+{
+	int i,j,k;
+
+	double frame_sig_real;
+	double frame_sig_imag;
+	double D_cor_uw_real_part;
+	double D_cor_uw_imag_part;
+	double D_rsp_real_part[AIRFREQ_EST_FRAME_SIG_LEN][AIRFREQ_EST_FRAME_SIG_LEN];
+	double D_rsp_imag_part[AIRFREQ_EST_FRAME_SIG_LEN][AIRFREQ_EST_FRAME_SIG_LEN];
+	double D_sum_rsp_real_tmp;
+	double D_sum_rsp_imag_tmp;
+	double D_sum_rsp_real[AIRFREQ_EST_FRAME_SIG_LEN];
+	double D_sum_rsp_imag[AIRFREQ_EST_FRAME_SIG_LEN];
+	double D_rsp_frs_real;
+	double D_rsp_frs_imag;
+	double D_sum_rsp_frs_real;
+	double D_sum_rsp_frs_imag;
+	double D_fre_est;
+
+	if (group_array_len > AIRFREQ_EST_GROUP_ARRAY_LEN)
+	{
+		return 1;
+	}
+
+	//if (frame_sig_len > AIRFREQ_EST_FRAME_SIG_LEN)
+	//{
+	//	return 2;
+	//}
+
+	if (rx_uw_sig_len > AIRFREQ_EST_RX_UW_SIG_LEN)
+	{
+		return 3;
+	}
+	
+	*cfo_est = P_airfreq_est_parameter->cfo_est_old;
+	D_fre_est = P_airfreq_est_parameter->fre_est;
+
+	for (i=1; i<group_array_len; i++)
+	{
+		//frame_sig  = frame_sig.*exp(-j*(1:UW_len)*fre_est);
+		//cor_uw= frame_sig.*conj(rx_uw_sig);
+		//rsp = reshape(cor_uw.', group_array(nn),[]);
+		for (j=0; j<P_airfreq_est_parameter->uw_len; j++)
+		{
+			frame_sig_real = frame_sig_real_part[j] * cos((j+1) * D_fre_est) - frame_sig_imag_part[j] * ((-1) * sin((j+1) * D_fre_est));
+			frame_sig_imag = frame_sig_real_part[j] * ((-1) * sin((j+1) * D_fre_est)) + frame_sig_imag_part[j] * cos((j+1) * D_fre_est);
+			/*exp(a),如果a是常数，则：exp(a)=e^a(e的a次方)
+			如果a是矩阵，则：矩阵每个元素对应求exp()。例：exp([1,2,3])=[e,e*e,e*e*e]
+			欧拉公式 e^(iθ)=cosθ+isinθ
+			e^(a + θ*i)=e^a * e^(θ*i) = e^a * (cosθ+isinθ)
+			e^(0 - θ*i)=e^0 * e^(-θ*i)= 1 * (cosθ-isinθ)=cosθ-i*sinθ
+			-j * a = 0 - a*i */
+			
+			D_cor_uw_real_part = frame_sig_real * rx_uw_sig_real_part[j] - frame_sig_imag * (-1) * rx_uw_sig_imag_part[j];
+			D_cor_uw_imag_part = frame_sig_real * (-1) * rx_uw_sig_imag_part[j] + frame_sig_imag * rx_uw_sig_real_part[j];
+			
+			D_rsp_real_part[j % (P_airfreq_est_parameter->group_array[i])][j / (P_airfreq_est_parameter->group_array[i])] = D_cor_uw_real_part;
+			D_rsp_imag_part[j % (P_airfreq_est_parameter->group_array[i])][j / (P_airfreq_est_parameter->group_array[i])] = D_cor_uw_imag_part;
+			
+			frame_sig_real_part[j] = frame_sig_real;  
+			frame_sig_imag_part[j] = frame_sig_imag;  //采用中间变量，因为复数点乘时需要实部虚部需要相互用到，防止变量被中间赋值
+		}
+		//sum_rsp = sum(rsp,1);
+		for (j=0; j<((P_airfreq_est_parameter->uw_len) / (P_airfreq_est_parameter->group_array[i])); j++)
+		{
+			D_sum_rsp_real_tmp = 0;
+			D_sum_rsp_imag_tmp = 0;  //累积和初值在循环开始处赋零
+			for (k=0; k<P_airfreq_est_parameter->group_array[i]; k++)
+			{
+				D_sum_rsp_real_tmp = D_sum_rsp_real_tmp + D_rsp_real_part[k][j];
+				D_sum_rsp_imag_tmp = D_sum_rsp_imag_tmp + D_rsp_imag_part[k][j];
+			}
+
+			D_sum_rsp_real[j] = D_sum_rsp_real_tmp;
+			D_sum_rsp_imag[j] = D_sum_rsp_imag_tmp;
+		}
+		//rsp_frs = sum_rsp(2:2:end).*conj(sum_rsp(1:2:end));
+		D_sum_rsp_frs_real = 0;
+		D_sum_rsp_frs_imag = 0;  //累积和初值在循环开始处赋零
+		for (j=0; j<((P_airfreq_est_parameter->uw_len) / (P_airfreq_est_parameter->group_array[i]) / 2); j++)
+		{
+			D_rsp_frs_real = D_sum_rsp_real[2*j + 1] * D_sum_rsp_real[2*j] - D_sum_rsp_imag[2*j + 1] * (-1) * D_sum_rsp_imag[2*j];
+			D_rsp_frs_imag = D_sum_rsp_real[2*j + 1] * (-1) * D_sum_rsp_imag[2*j] + D_sum_rsp_imag[2*j + 1] * D_sum_rsp_real[2*j];
+			
+			D_sum_rsp_frs_real = D_sum_rsp_frs_real + D_rsp_frs_real;
+			D_sum_rsp_frs_imag = D_sum_rsp_frs_imag + D_rsp_frs_imag;
+		}
+
+		D_fre_est = atan2(D_sum_rsp_frs_imag, D_sum_rsp_frs_real) / (P_airfreq_est_parameter->group_array[i]);
+		*cfo_est = *cfo_est + D_fre_est;		 
+	}
+	return 0;
+} 
+
+

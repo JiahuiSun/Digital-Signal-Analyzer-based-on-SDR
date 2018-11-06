@@ -1,0 +1,7 @@
+#include <string.h>
+#include <malloc.h>
+
+#include "type_CSM.h"
+
+int correct_freq (double *PD_in_ds_sig_real, double *PD_in_ds_sig_imag,double *PD_out_cf_sig_real,double *PD_out_cf_sig_imag,
+	int I_ds_sig_len, double d_cfo);

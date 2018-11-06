@@ -1,0 +1,244 @@
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	turbo_dec;
+Function Description:
+	turbo译码;
+Inputs:
+	PD_in_turbo_enc		:	输入信息序列指针；
+	I_source_info_len	：	输入源信息(不含turbo校验位)序列长度；
+	I_actual_info_length:	输入待译码信息(含turbo校验位)序列长度；
+	PI_out_turbo_dec	：	输出信息序列指针；
+	I_code_memory		：	输入卷积码编码器中寄存器个数；
+	I_denominator		：	输入编码长度，每次编码输出卷积码编码器的bit数；
+	I_numerator			：	输入码元长度，即每次编码输入卷积码编码器的bit数；
+	I_tailed			：	输入是否为咬尾卷积码；
+	Tc_iteration_num	：	输入最多迭代次数；
+	D_tc_max			：	输入软信息限制幅度；
+Outputs:
+	返回0：正常;
+	返回9：长度不合法;
+Notes:1/2turbo码解码
+***********************************************************/
+#include "air_turbo_dec.h"
+//#include "../../head_file/common.h"
+
+int air_turbo_dec(d_type *PD_in_turbo_dec, int I_source_info_len, int I_actual_info_length, int *PI_out_turbo_dec ,  int I_code_memory,int I_denominator,int I_numerator,int I_tailed,
+			  int I_parity_so ,int Tc_iteration_num,  d_type D_tc_max)
+{
+	d_type LMAX=10000000000;
+	int i,j;
+	int check_sum_d=0;
+	int result;
+
+	d_type new_tail[3];
+ 	
+	d_type PD_out_de_rate[13000]={0};
+	d_type *xx = NULL;
+	d_type *yy1 = NULL;
+	d_type *tt1 = NULL;
+	d_type *yy2 = NULL;
+	d_type *tt2 = NULL;
+
+	d_type x[4000]; 
+ 	d_type y1[4050]; 
+ 	d_type y2[4050];
+ 	d_type t1[50];
+ 	d_type t2[50];
+
+ 	d_type f_x[4000];
+	d_type f_y1[4050];
+	d_type f_y2[4050];
+	d_type f_t1[50];
+	d_type f_t2[50];
+
+	d_type temp[4050];
+ 	d_type temp_inter[4050];
+	d_type LL_out[4050];
+ 	d_type xe_out[4050];
+	d_type ye_out[4050];
+ 	d_type z[4050];
+ 	d_type temp_LL[4050];
+ 	int d[4050];
+	int d1[4050];
+
+	if(I_source_info_len > 4000)
+	{
+		return 9;
+	}
+
+	for(i=0; i<I_source_info_len; i++)
+	{
+	PD_out_de_rate[i]=PD_in_turbo_dec[2*i];
+	}
+	for(i=0; i<I_source_info_len;i=i+2)
+	{
+	PD_out_de_rate[i+I_source_info_len]=PD_in_turbo_dec[2*i+1];
+	PD_out_de_rate[i+2*I_source_info_len+6+1]=PD_in_turbo_dec[2*i+3];
+	}
+
+	if(I_tailed)
+		for(i=0;i<6;i++)
+		{
+		PD_out_de_rate[i+2*I_source_info_len]=PD_in_turbo_dec[2*I_source_info_len+i];
+		PD_out_de_rate[i+3*I_source_info_len+6]=PD_in_turbo_dec[2*I_source_info_len+i+6];
+		}
+		
+		
+
+
+	for(i=0; i<3*I_source_info_len+12; i++)
+	{
+
+		/*
+		if (PD_in_turbo_dec[i]<D_tc_max && PD_in_turbo_dec[i]>-D_tc_max)
+		{}
+		else if (PD_in_turbo_dec[i]>D_tc_max)
+		{
+			PD_in_turbo_dec[i] = D_tc_max;
+		}
+		else
+		{
+			PD_in_turbo_dec[i] = -D_tc_max;
+		}
+		PD_in_turbo_dec[i] = exp(PD_in_turbo_dec[i]);
+		*/
+		if (PD_out_de_rate[i]<D_tc_max && PD_out_de_rate[i]>-D_tc_max)
+		{}
+		else if (PD_out_de_rate[i]>D_tc_max)
+		{
+			PD_out_de_rate[i] = D_tc_max;
+		}
+		else
+		{
+			PD_out_de_rate[i] = -D_tc_max;
+		}
+		PD_out_de_rate[i] = exp(PD_out_de_rate[i]);
+
+	}
+
+
+
+	//result = de_rate_matching(PD_in_turbo_dec, I_actual_info_length, PD_out_de_rate, I_source_info_len, (PD_out_de_rate+I_source_info_len), (2*I_source_info_len+12), 1);
+	//if (result)
+	//{
+	//	return 1;
+	//}
+
+	for(i=0; i<I_code_memory*I_tailed; i++)
+	{
+		new_tail[i] = PD_out_de_rate[I_source_info_len*2+2*i];
+	}
+	for(i=0; i<I_code_memory*I_tailed; i++)
+	{
+		PD_out_de_rate[I_source_info_len*2+i] = PD_out_de_rate[I_source_info_len*2+2*i+1];
+	}
+	for(i=0; i<I_code_memory*I_tailed; i++)
+	{
+		PD_out_de_rate[I_source_info_len*2+I_code_memory*I_tailed+i] = new_tail[i];
+	}
+
+	for(i=0; i<I_code_memory*I_tailed; i++)
+	{
+		new_tail[i] = PD_out_de_rate[I_source_info_len*3+2*I_code_memory*I_tailed+2*i];
+	}
+	for(i=0; i<I_code_memory*I_tailed; i++)
+	{
+		PD_out_de_rate[I_source_info_len*3+2*I_code_memory*I_tailed+i] = PD_out_de_rate[I_source_info_len*3+2*I_code_memory*I_tailed+2*i+1];
+	}
+	for(i=0; i<I_code_memory*I_tailed; i++)
+	{
+		PD_out_de_rate[I_source_info_len*3+3*I_code_memory*I_tailed+i] = new_tail[i];
+	}
+
+	xx = PD_out_de_rate;
+	yy1 = PD_out_de_rate + I_source_info_len;
+	tt1 = PD_out_de_rate + 2*I_source_info_len + I_code_memory*I_tailed;
+	yy2 = PD_out_de_rate + 2*I_source_info_len + 2*I_code_memory*I_tailed;
+	tt2 = PD_out_de_rate + 3*I_source_info_len + 3*I_code_memory*I_tailed;
+
+	for(i=0;i<(I_source_info_len+I_code_memory*I_tailed*I_parity_so);i++)
+	{
+		*(z+i)=1;
+	}
+	
+ 	Llimiter(xx,I_source_info_len,LMAX,x);
+ 	Llimiter(yy1,(I_source_info_len+I_code_memory*I_tailed),LMAX,y1);
+ 	Llimiter(tt1,(I_code_memory*I_tailed),LMAX,t1);
+ 	Llimiter(yy2,(I_source_info_len+I_code_memory*I_tailed),LMAX,y2);
+ 	Llimiter(tt2,(I_code_memory*I_tailed),LMAX,t2);
+ 	
+	for(i=0;i<(I_source_info_len+I_code_memory*I_tailed);i++)
+	{
+		*(f_y1+i)=(d_type)*(y1+i);
+		*(f_y2+i)=(d_type)*(y2+i);
+	}
+	for(i=0;i<(I_code_memory*I_tailed);i++)
+	{
+		*(f_t1+i)=(d_type)*(t1+i);
+		*(f_t2+i)=(d_type)*(t2+i);
+	}
+	for(i=0;i<(I_source_info_len);i++)
+	{
+		*(f_x+i)=(d_type)*(x+i);
+	}
+
+ 	for(i=0;i<Tc_iteration_num;i++)
+	{
+		for(j=0;j<(I_source_info_len+I_code_memory*I_tailed*I_parity_so);j++)
+		{
+			*(temp+j)=(*(f_x+j))*(*(z+j));
+		}
+		rsc_decoder(I_code_memory,I_denominator,I_numerator,I_tailed,I_parity_so,I_source_info_len,temp,f_y1,f_t1,LL_out,xe_out,ye_out);
+
+		for(j=0;j<(I_source_info_len+I_code_memory*I_tailed*I_parity_so);j++)
+		{
+			*(z+j)=*(xe_out+j);
+		}
+		for(j=0;j<(I_source_info_len+I_code_memory*I_tailed*I_parity_so);j++)
+		{
+			*(temp+j)=(*(f_x+j))*(*(z+j));
+		}
+		interleaver_d_type(temp, (I_source_info_len+I_code_memory*I_tailed*I_parity_so),temp_inter);
+		rsc_decoder(I_code_memory,I_denominator,I_numerator,I_tailed,I_parity_so,I_source_info_len,temp_inter,f_y2,f_t2,LL_out,xe_out,ye_out);
+		deinterleaver(xe_out, (I_source_info_len+I_code_memory*I_tailed*I_parity_so),z);
+		deinterleaver(LL_out, (I_source_info_len+I_code_memory*I_tailed*I_parity_so),temp_LL);
+		decision(temp_LL,(I_source_info_len+I_code_memory*I_tailed*I_parity_so),d);
+		
+		for(j=0;j<(I_source_info_len+I_code_memory*I_tailed*I_parity_so);j++)
+		{
+			PI_out_turbo_dec[j]=d[j];
+		}
+	
+		if(i>0)
+		{
+			check_sum_d = 0;
+			for(j=0;j<(I_source_info_len+I_code_memory*I_tailed*I_parity_so);j++)
+			{
+				if(d1[j]!=d[j])
+				{
+					check_sum_d++;
+					break;
+				}
+			}
+			if(check_sum_d==0)
+			{
+				for(j=0;j<(I_source_info_len+I_code_memory*I_tailed*I_parity_so);j++)
+				{
+					PI_out_turbo_dec[j]=d[j];
+				}
+				/*return 1*/;
+			}
+		}
+		for(j=0;j<(I_source_info_len+I_code_memory*I_tailed*I_parity_so);j++)
+		{
+			d1[j]=d[j];
+		}
+	
+		
+	}
+	/////////////////////////// modified by GAO 2015006 /////////////////////////
+	if(check_sum_d==0) return 1;
+	else return 0;
+}

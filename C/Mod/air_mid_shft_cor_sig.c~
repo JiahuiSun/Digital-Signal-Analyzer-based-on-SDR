@@ -1,0 +1,184 @@
+/***********************************************************
+Company Name:
+	Ç廪ﾴóѧÎÞÏßÖÐÐÄ;
+Function Name:
+	Air_mid_shft_cor_sig;
+Function Description:
+	ƵƫﾾÀÕý
+Inputs:
+	D_rx_uw_sig_real_part[]									ﾣﾺ	ÊäÈ룬ÐźÅʵﾲ﾿
+	D_rx_uw_sig_imag_part[]									ﾣﾺ	ÊäÈ룬ÐźÅÐ鲿
+	D_mf_sig_real_part[]									ﾣﾺ	ÊäÈ룬ÐźÅʵﾲ﾿
+	D_mf_sig_imag_part[]									ﾣﾺ	ÊäÈ룬ÐźÅÐ鲿
+	I_mf_sig_len											:	ÊäÈ룬ÐźųﾤﾶÈ
+	P_Air_mid_shft_cor_sig_para->I_UW_len					ﾣﾺ	ÊäÈ룬
+	P_Air_mid_shft_cor_sig_para->I_rx_os					ﾣﾺ	ÊäÈ룬
+	P_Air_mid_shft_cor_sig_para->I_group			ﾣﾺ	ÊäÈ룬
+
+	D_sum_rsp_out_real_part[][]								ﾣﾺ	Êäﾳöﾣﾬ
+	D_sum_rsp_out_imag_part[][]								ﾣﾺ	Êäﾳöﾣﾬ
+	*I_sum_rsp_out_row										ﾣﾺ	Êäﾳöﾣﾬ
+	*I_sum_rsp_out_col										ﾣﾺ	Êäﾳöﾣﾬ
+	D_sum_abs_out[];										ﾣﾺ	Êäﾳöﾣﾬ
+	*I_sum_abs_out_len										ﾣﾺ	Êäﾳöﾣﾬ
+Outputs:
+	ﾷﾵﾻØ0ﾣﾺÕýﾳﾣﾣﾻ
+	ﾷﾵﾻØ1ﾣﾺÊäÈëﾲÎÊýI_mf_sig_lenﾵÄֵ̫Сﾣﾻ
+	ﾷﾵﾻØ2ﾣﾺﾺ궨ÒåAIR_MID_SHFT_COR_SIG_UW_LENﾵÄֵ̫Сﾣﾻ
+	ﾷﾵﾻØ3ﾣﾺﾺ궨ÒåAIR_MID_SHFT_COR_SIG_RSP_ROWﾵÄֵ̫Сﾣﾻ
+	ﾷﾵﾻØ4ﾣﾺﾺ궨ÒåAIR_MID_SHFT_COR_SIG_RSP_COLﾵÄֵ̫С
+Notes: 
+**************************************************************************/
+#include "air_mid_shft_cor_sig.h"
+
+int Air_mid_shft_cor_sig (d_type D_rx_uw_sig_real_part[],d_type D_rx_uw_sig_imag_part[],d_type D_mf_sig_real_part[],d_type D_mf_sig_imag_part[],int I_mf_sig_len,Air_mid_shft_cor_sig_para *P_Air_mid_shft_cor_sig_para,d_type D_sum_rsp_out_real_part[][AIR_MID_SHFT_COR_SIG_RSP_COL],d_type D_sum_rsp_out_imag_part[][AIR_MID_SHFT_COR_SIG_RSP_COL],d_type D_sum_abs_out[])
+		{
+			int		i;
+			int		m;
+			int		n;
+			int		group_num = (P_Air_mid_shft_cor_sig_para->I_UW_len) / (P_Air_mid_shft_cor_sig_para->I_group);
+	
+			//d_type	D_cand_uw_real[AIR_MID_SHFT_COR_SIG_UW_LEN]={0};
+			//d_type	D_cand_uw_imag[AIR_MID_SHFT_COR_SIG_UW_LEN]={0};
+			d_type	D_cand_uw_real=0;
+			d_type	D_cand_uw_imag=0;
+			d_type	D_cor_uw_real[AIR_MID_SHFT_COR_SIG_UW_LEN]={0};
+			d_type	D_cor_uw_imag[AIR_MID_SHFT_COR_SIG_UW_LEN]={0};
+			//d_type  D_rsp_real[AIR_MID_SHFT_COR_SIG_RSP_ROW][AIR_MID_SHFT_COR_SIG_RSP_COL]={0};
+			//d_type  D_rsp_imag[AIR_MID_SHFT_COR_SIG_RSP_ROW][AIR_MID_SHFT_COR_SIG_RSP_COL]={0};
+			d_type	D_sum_rsp_real=0;
+			d_type	D_sum_rsp_imag=0;
+			d_type	D_sum_abs=0;
+			
+			for(i=0; i<(I_mf_sig_len); i++)
+			{
+				for(n=0; n<(P_Air_mid_shft_cor_sig_para->I_UW_len); n++)
+				{
+					//cand_uw = mf_sig(nn -1 + (1: rx_os: rx_os*UW_len))
+					D_cand_uw_real = D_mf_sig_real_part[i + (P_Air_mid_shft_cor_sig_para->I_rx_os) * n];
+					D_cand_uw_imag = D_mf_sig_imag_part[i + (P_Air_mid_shft_cor_sig_para->I_rx_os) * n];
+					//cor_uw = cand_uw.*conj(rx_uw_sig)
+					D_cor_uw_real[n] = D_cand_uw_real * D_rx_uw_sig_real_part[n] + D_cand_uw_imag * D_rx_uw_sig_imag_part[n];
+					D_cor_uw_imag[n] = D_cand_uw_imag * D_rx_uw_sig_real_part[n] - D_cand_uw_real * D_rx_uw_sig_imag_part[n];
+				}
+
+
+				D_sum_abs = 0;
+				for(n=0; n<group_num; n++)
+				{
+					D_sum_rsp_real = 0;
+					D_sum_rsp_imag = 0;
+					for(m=0; m<(P_Air_mid_shft_cor_sig_para->I_group); m++)
+					{
+						D_sum_rsp_real = D_sum_rsp_real + D_cor_uw_real[(P_Air_mid_shft_cor_sig_para->I_group) * n + m];
+						D_sum_rsp_imag = D_sum_rsp_imag + D_cor_uw_imag[(P_Air_mid_shft_cor_sig_para->I_group) * n + m];
+					}
+					D_sum_rsp_out_real_part[i][n] = D_sum_rsp_real;
+					D_sum_rsp_out_imag_part[i][n] = D_sum_rsp_imag;
+					
+					D_sum_abs = D_sum_abs + sqrt(D_sum_rsp_real * D_sum_rsp_real + D_sum_rsp_imag * D_sum_rsp_imag);
+				}
+				D_sum_abs_out[i] = D_sum_abs;
+			}
+			//*I_sum_rsp_out_row = I_mf_sig_len;
+			//*I_sum_rsp_out_col = group_num;	
+			//*I_sum_abs_out_len = I_mf_sig_len;
+
+			return 0;
+		}
+
+int Air_mid_shft_cor_sig2 (d_type D_rx_uw_sig_real_part[],d_type D_rx_uw_sig_imag_part[],d_type D_mf_sig_real_part[],d_type D_mf_sig_imag_part[],int offset, int I_mf_sig_len,Air_mid_shft_cor_sig_para *P_Air_mid_shft_cor_sig_para,d_type D_sum_rsp_out_real_part[][2],d_type D_sum_rsp_out_imag_part[][2],d_type D_sum_abs_out[])
+		{
+			int		i;
+			int		m;
+			int		n;
+			int		group_num = (P_Air_mid_shft_cor_sig_para->I_UW_len) / (P_Air_mid_shft_cor_sig_para->I_group);
+	
+			d_type	D_cand_uw_real=0;
+			d_type	D_cand_uw_imag=0;
+			d_type	D_cor_uw_real[AIR_MID_SHFT_COR_SIG_UW_LEN]={0};
+			d_type	D_cor_uw_imag[AIR_MID_SHFT_COR_SIG_UW_LEN]={0};
+			d_type	D_sum_rsp_real=0;
+			d_type	D_sum_rsp_imag=0;
+			d_type	D_sum_abs=0;
+			
+			for(i=0; i<(I_mf_sig_len); i++)
+			{
+				for(n=0; n<(P_Air_mid_shft_cor_sig_para->I_UW_len); n++)
+				{
+					//cand_uw = mf_sig(nn -1 + (1: rx_os: rx_os*UW_len))
+					D_cand_uw_real = D_mf_sig_real_part[offset + i + (P_Air_mid_shft_cor_sig_para->I_rx_os) * n];
+					D_cand_uw_imag = D_mf_sig_imag_part[offset + i + (P_Air_mid_shft_cor_sig_para->I_rx_os) * n];
+					//cor_uw = cand_uw.*conj(rx_uw_sig)
+					D_cor_uw_real[n] = D_cand_uw_real * D_rx_uw_sig_real_part[n] + D_cand_uw_imag * D_rx_uw_sig_imag_part[n];
+					D_cor_uw_imag[n] = D_cand_uw_imag * D_rx_uw_sig_real_part[n] - D_cand_uw_real * D_rx_uw_sig_imag_part[n];
+				}
+
+
+				D_sum_abs = 0;
+				for(n=0; n<group_num; n++)
+				{
+					D_sum_rsp_real = 0;
+					D_sum_rsp_imag = 0;
+					for(m=0; m<(P_Air_mid_shft_cor_sig_para->I_group); m++)
+					{
+						D_sum_rsp_real = D_sum_rsp_real + D_cor_uw_real[(P_Air_mid_shft_cor_sig_para->I_group) * n + m];
+						D_sum_rsp_imag = D_sum_rsp_imag + D_cor_uw_imag[(P_Air_mid_shft_cor_sig_para->I_group) * n + m];
+					}
+					D_sum_rsp_out_real_part[i][n] = D_sum_rsp_real;
+					D_sum_rsp_out_imag_part[i][n] = D_sum_rsp_imag;
+					
+					D_sum_abs = D_sum_abs + sqrt(D_sum_rsp_real * D_sum_rsp_real + D_sum_rsp_imag * D_sum_rsp_imag);
+				}
+				D_sum_abs_out[i] = D_sum_abs;
+			}
+
+			return 0;
+		}
+
+
+int Air_mid_shft_cor_sig_new (d_type D_rx_uw_sig_real_part[],d_type D_rx_uw_sig_imag_part[],d_type D_mf_sig_real_part[],d_type D_mf_sig_imag_part[], int I_mf_sig_len,Air_mid_shft_cor_sig_para *P_Air_mid_shft_cor_sig_para,d_type D_sum_rsp_out_real_part[],d_type D_sum_rsp_out_imag_part[],d_type D_sum_abs_out[])
+		{
+			int		i;
+			int		m;
+			int		n;
+	
+			d_type	D_cand_uw_real=0;
+			d_type	D_cand_uw_imag=0;
+			d_type	D_cor_uw_real[AIR_MID_SHFT_COR_SIG_UW_LEN]={0};
+			d_type	D_cor_uw_imag[AIR_MID_SHFT_COR_SIG_UW_LEN]={0};
+			d_type	D_sum_rsp_real=0;
+			d_type	D_sum_rsp_imag=0;
+
+			
+			for(i=0; i<(I_mf_sig_len); i++)
+			{
+				for(n=0; n<(P_Air_mid_shft_cor_sig_para->I_UW_len); n++)
+				{
+					//cand_uw = mf_sig(nn -1 + (1: rx_os: rx_os*UW_len))
+					D_cand_uw_real = D_mf_sig_real_part[i + (P_Air_mid_shft_cor_sig_para->I_rx_os) * n];
+					D_cand_uw_imag = D_mf_sig_imag_part[i + (P_Air_mid_shft_cor_sig_para->I_rx_os) * n];
+					//cor_uw = cand_uw.*conj(rx_uw_sig)
+					D_cor_uw_real[n] = D_cand_uw_real * D_rx_uw_sig_real_part[n] + D_cand_uw_imag * D_rx_uw_sig_imag_part[n];
+					D_cor_uw_imag[n] = D_cand_uw_imag * D_rx_uw_sig_real_part[n] - D_cand_uw_real * D_rx_uw_sig_imag_part[n];
+				}
+
+
+
+				D_sum_rsp_real = 0;
+				D_sum_rsp_imag = 0;
+				for(m=0; m<(P_Air_mid_shft_cor_sig_para->I_group); m++)
+				{
+					D_sum_rsp_real = D_sum_rsp_real + D_cor_uw_real[m];
+					D_sum_rsp_imag = D_sum_rsp_imag + D_cor_uw_imag[m];
+				}
+				
+				D_sum_rsp_out_real_part[i] = D_sum_rsp_real;
+				D_sum_rsp_out_imag_part[i] = D_sum_rsp_imag;
+					
+				D_sum_abs_out[i] = sqrt(D_sum_rsp_real * D_sum_rsp_real + D_sum_rsp_imag * D_sum_rsp_imag);
+
+			}
+
+			return 0;
+		}

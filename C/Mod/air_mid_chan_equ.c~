@@ -1,0 +1,228 @@
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	Air_mid_chan_equ;
+Function Description:
+	信道估计
+Inputs:
+	D_sync_frame_real_part[]				：	输入，输入信号sync_frame的实部
+	D_sync_frame_imag_part[]				：	输入，输入信号sync_frame的虚部
+	I_sync_frame_len						:	输入，输入信号sync_frame的长度  >= I_mes_syms_len + I_UW_len //=2094+192=2286
+	P_Air_mid_chan_equ_para->I_cfo_seg_num	：	输入，
+	P_Air_mid_chan_equ_para->I_UW_len		：	输入，
+	P_Air_mid_chan_equ_para->I_seg_len		：	输入,
+	P_Air_mid_chan_equ_para->I_mes_syms_len	：	输入,
+	P_Air_mid_chan_equ_para->I_pow_num		：	输入，
+	P_Air_mid_chan_equ_para->I_bitspersym	：	输入，
+	P_Air_mid_chan_equ_para->D_cfo_est		：	输入,
+	P_Air_mid_chan_equ_para->D_cfo_alpha	：	输入,
+	P_Air_mid_chan_equ_para->D_ang_est		：	输入,
+
+	D_sync_sig_real_part_out[]				:	输出，输出信号sync_sig的实部
+	D_sync_sig_imag_part_out[]				:	输出, 输出信号sync_sig的虚部		
+	*I_sync_sig_out_len						:	输出, 输出信号sync_sig的长度
+	*D_cfo_est_out
+	//*D_sig_val_out
+	//*D_mag_val_out
+
+Outputs:
+	返回0：正常；
+	返回1：输入参数I_sync_frame_len的值太小；
+	返回2：宏定义AIR_MID_CHAN_EQU_CAND_SIG_LEN的值太小；
+	返回3：宏定义AIR_MID_CHAN_EQU_POW_NUM的值太小；
+Notes: 
+**************************************************************************/
+
+#include "air_mid_chan_equ.h"
+
+int Air_mid_chan_equ (double D_sync_frame_real_part[],double D_sync_frame_imag_part[],int I_sync_frame_len,Air_mid_chan_equ_para *P_Air_mid_chan_equ_para,double D_sync_sig_real_part_out[],double D_sync_sig_imag_part_out[],int *I_sync_sig_out_len,double *D_cfo_est_out, int *fuz_flag)
+		{
+			int 	i;
+			int 	n;
+			int		I_cand_sig_len;	
+			int		I_loc_mid;
+			int		I_loc_end;
+			int		I_ang_idx;
+
+			double	D_cand_sig_real[AIR_MID_CHAN_EQU_CAND_SIG_LEN];	
+			double	D_cand_sig_imag[AIR_MID_CHAN_EQU_CAND_SIG_LEN];
+			double	D_cfo_crt_sig_real[AIR_MID_CHAN_EQU_CAND_SIG_LEN];
+			double	D_cfo_crt_sig_imag[AIR_MID_CHAN_EQU_CAND_SIG_LEN];
+			double	D_pow_sig_real[AIR_MID_CHAN_EQU_CAND_SIG_LEN];
+			double	D_pow_sig_imag[AIR_MID_CHAN_EQU_CAND_SIG_LEN];
+			double	D_sum_pow_sig_real;
+			double	D_sum_pow_sig_imag;
+			double	D_sum2_pow_sig_real;
+			double	D_sum2_pow_sig_imag;
+			double	D_fre_est_tmp;
+			double	D_fre_est;
+			double	D_cand_ang[AIR_MID_CHAN_EQU_POW_NUM];
+			double	D_dif_ang[AIR_MID_CHAN_EQU_POW_NUM];
+			double	D_abs_min;
+
+			if (I_sync_frame_len<((P_Air_mid_chan_equ_para->I_mes_syms_len) + (P_Air_mid_chan_equ_para->I_UW_len)))
+			{
+				return 1;//输入参数I_sync_frame_len的值太小
+			}
+			else if(AIR_MID_CHAN_EQU_CAND_SIG_LEN<(P_Air_mid_chan_equ_para->I_seg_len))
+			{
+				return 2;//宏定义AIR_MID_CHAN_EQU_CAND_SIG_LEN的值太小
+			}
+			else if(AIR_MID_CHAN_EQU_POW_NUM<(P_Air_mid_chan_equ_para->I_pow_num))
+			{
+				return 3;//宏定义AIR_MID_CHAN_EQU_POW_NUM的值太小
+			}
+			else
+			{
+				//for ii = 1: cfo_seg_num
+				*fuz_flag = 0;
+				for(i=0; i<(P_Air_mid_chan_equ_para->I_cfo_seg_num); i++)
+				{
+					if((i+1)*(P_Air_mid_chan_equ_para->I_seg_len)<(P_Air_mid_chan_equ_para->I_mes_syms_len))
+					{
+						//cand_sig = sync_frame(UW_len + ((ii -1)*seg_len + 1: min(ii*seg_len,mes_syms_len)) );
+						for(n=0; n<(P_Air_mid_chan_equ_para->I_seg_len); n++)
+						{
+							D_cand_sig_real[n] = D_sync_frame_real_part[(P_Air_mid_chan_equ_para->I_UW_len) + i * (P_Air_mid_chan_equ_para->I_seg_len) + n];
+							D_cand_sig_imag[n] = D_sync_frame_imag_part[(P_Air_mid_chan_equ_para->I_UW_len) + i * (P_Air_mid_chan_equ_para->I_seg_len) + n];
+						}
+						//cs_len = length(cand_sig);
+						I_cand_sig_len = (P_Air_mid_chan_equ_para->I_seg_len);
+					}
+					else
+					{
+						//cand_sig = sync_frame(UW_len + ((ii -1)*seg_len + 1: min(ii*seg_len,mes_syms_len)) );
+						for(n=0; n<((P_Air_mid_chan_equ_para->I_mes_syms_len) - i * (P_Air_mid_chan_equ_para->I_seg_len)); n++)
+						{
+							D_cand_sig_real[n] = D_sync_frame_real_part[(P_Air_mid_chan_equ_para->I_UW_len) + i * (P_Air_mid_chan_equ_para->I_seg_len) + n];
+							D_cand_sig_imag[n] = D_sync_frame_imag_part[(P_Air_mid_chan_equ_para->I_UW_len) + i * (P_Air_mid_chan_equ_para->I_seg_len) + n];
+						}
+						//cs_len = length(cand_sig);
+						I_cand_sig_len = (P_Air_mid_chan_equ_para->I_mes_syms_len) - i * (P_Air_mid_chan_equ_para->I_seg_len);
+					}
+					//exp(-j*cfo_est*(1:cs_len)) = cos(cfo_est * (n+1)) - i*sin(cfo_est * (n+1))
+					for(n=0; n<I_cand_sig_len; n++)
+					{	//cfo_crt_sig = cand_sig.*exp(-j*cfo_est*(1:cs_len));
+						D_cfo_crt_sig_real[n] = D_cand_sig_real[n] * cos((P_Air_mid_chan_equ_para->D_cfo_est) * (n+1)) + D_cand_sig_imag[n] * sin((P_Air_mid_chan_equ_para->D_cfo_est) * (n+1));
+						D_cfo_crt_sig_imag[n] = D_cand_sig_imag[n] * cos((P_Air_mid_chan_equ_para->D_cfo_est) * (n+1)) - D_cand_sig_real[n] * sin((P_Air_mid_chan_equ_para->D_cfo_est) * (n+1));
+						//pow_sig = cfo_crt_sig.^pow_num;
+						//(a + bi)^n = ((sqrt(a*a +b*b))^n * cos(n * atan(b/a))) + i * ((sqrt(a*a +b*b))^n * sin(n * atan(b/a)))
+						//pow(double x,double y) = x^y
+						D_pow_sig_real[n] = pow((sqrt(D_cfo_crt_sig_real[n] * D_cfo_crt_sig_real[n] + D_cfo_crt_sig_imag[n] * D_cfo_crt_sig_imag[n])),(P_Air_mid_chan_equ_para->I_pow_num)) * cos((P_Air_mid_chan_equ_para->I_pow_num) * atan(D_cfo_crt_sig_imag[n] / D_cfo_crt_sig_real[n]));
+						D_pow_sig_imag[n] = pow((sqrt(D_cfo_crt_sig_real[n] * D_cfo_crt_sig_real[n] + D_cfo_crt_sig_imag[n] * D_cfo_crt_sig_imag[n])),(P_Air_mid_chan_equ_para->I_pow_num)) * sin((P_Air_mid_chan_equ_para->I_pow_num) * atan(D_cfo_crt_sig_imag[n] / D_cfo_crt_sig_real[n]));
+					}
+					//if mod(cs_len,2) == 0
+					if((I_cand_sig_len % 2) == FLASE)
+					{
+						//loc_mid = cs_len/2;
+						I_loc_mid = I_cand_sig_len / 2;
+						//loc_end = cs_len;
+						I_loc_end = I_cand_sig_len;
+					}
+					else
+					{
+						//loc_mid = (cs_len -1)/2;
+						I_loc_mid = (I_cand_sig_len - 1) / 2;
+						//loc_end = cs_len - 1;
+						I_loc_end = I_cand_sig_len - 1;
+					}
+
+					D_sum_pow_sig_real=0;
+					D_sum_pow_sig_imag=0;
+					for(n=I_loc_mid; n<I_loc_end; n++)
+					{
+						D_sum_pow_sig_real = D_sum_pow_sig_real + D_pow_sig_real[n];//a
+						D_sum_pow_sig_imag = D_sum_pow_sig_imag + D_pow_sig_imag[n];//b
+					}
+					D_sum2_pow_sig_real=0;
+					D_sum2_pow_sig_imag=0;
+					for(n=0; n<I_loc_mid; n++)
+					{
+						D_sum2_pow_sig_real = D_sum2_pow_sig_real + D_pow_sig_real[n];//c
+						D_sum2_pow_sig_imag = D_sum2_pow_sig_imag + D_pow_sig_imag[n];//d
+					}
+					//(a+bi)*(c-di)=(ac+bd)+(bc-ad)i     atan2（（bc-ad)），（ac+bd））
+					D_fre_est_tmp = atan2((D_sum_pow_sig_imag * D_sum2_pow_sig_real - D_sum_pow_sig_real * D_sum2_pow_sig_imag),(D_sum_pow_sig_real * D_sum2_pow_sig_real + D_sum_pow_sig_imag * D_sum2_pow_sig_imag)) / I_loc_mid;
+					//fre_est = fre_est_tmp / pow_num;
+					D_fre_est = D_fre_est_tmp / (P_Air_mid_chan_equ_para->I_pow_num);
+					//cand_ang = angle(sum(pow_sig))/pow_num + 2*pi*(1: pow_num)/pow_num -  pi/4*(bitspersym -1);
+					D_sum_pow_sig_real=0;
+					D_sum_pow_sig_imag=0;
+					for(n=0; n<I_cand_sig_len; n++)
+					{
+						D_sum_pow_sig_real = D_sum_pow_sig_real + D_pow_sig_real[n];
+						D_sum_pow_sig_imag = D_sum_pow_sig_imag + D_pow_sig_imag[n];
+					}
+					for(n=0; n<(P_Air_mid_chan_equ_para->I_pow_num); n++)
+					{
+						D_cand_ang[n] = atan2(D_sum_pow_sig_imag,D_sum_pow_sig_real) / (P_Air_mid_chan_equ_para->I_pow_num) + 2 * DOUBLE_PI * (n + 1) / (P_Air_mid_chan_equ_para->I_pow_num) - DOUBLE_PI / 4 * ((P_Air_mid_chan_equ_para->I_bitspersym) - 1);
+						// dif_ang = mod(cand_ang - ang_est,2*pi);
+						//mod(x,y) = x - y * floor(x/y)
+						//D_dif_ang[n] = fmod((D_cand_ang[n] - (P_Air_mid_chan_equ_para->D_ang_est)),2 * DOUBLE_PI);
+						D_dif_ang[n] = (D_cand_ang[n] - (P_Air_mid_chan_equ_para->D_ang_est)) - 2 * DOUBLE_PI * floor((D_cand_ang[n] - (P_Air_mid_chan_equ_para->D_ang_est)) /(2 * DOUBLE_PI));
+						// dif_ang(dif_ang>pi) = dif_ang(dif_ang>pi) - 2*pi;
+						//如果dif_ang[n] <= pi,则dif_ang[n] = dif_ang[n];如果dif_ang[n]>pi,则dif_ang[n]=dif_ang[n]-2*pi
+						if(D_dif_ang[n]>DOUBLE_PI)
+						{
+							D_dif_ang[n] = D_dif_ang[n] - 2 * DOUBLE_PI;
+						}
+						else
+						{
+							D_dif_ang[n] = D_dif_ang[n];
+						}
+						// [~, ang_idx] = min(abs(dif_ang));
+						if(n==0)
+						{
+							I_ang_idx = n + 1;
+							D_abs_min = fabs(D_dif_ang[n]);
+						}
+						else
+						{
+							if((fabs(D_dif_ang[n]))<D_abs_min)
+							{
+								I_ang_idx = n + 1;
+								D_abs_min = fabs(D_dif_ang[n]);
+							}
+						}
+					}
+
+
+					//////////////////// added by GAO 20150806 /////////////////////////
+					if ((i == 0) && (P_Air_mid_chan_equ_para->I_pow_num == 2) && (D_abs_min > P_Air_mid_chan_equ_para->D_fuz_th)) 
+						*fuz_flag = 1;
+					//////////////////// ///////////////////// /////////////////////////
+
+					//ang_est = mod(cand_ang(ang_idx),2*pi);
+					//mod(x,y) = x - y * floor(x/y)
+					//(P_Air_mid_chan_equ_para->D_ang_est) = fmod(D_cand_ang[I_ang_idx - 1],DOUBLE_PI * 2);
+					(P_Air_mid_chan_equ_para->D_ang_est) = D_cand_ang[I_ang_idx - 1] -  2 * DOUBLE_PI * floor((D_cand_ang[I_ang_idx - 1]) /(2 * DOUBLE_PI));
+					//cfo_est =cfo_est + cfo_alpha*fre_est ;
+					(P_Air_mid_chan_equ_para->D_cfo_est) = (P_Air_mid_chan_equ_para->D_cfo_est) + (P_Air_mid_chan_equ_para->D_cfo_alpha) * D_fre_est;
+					//sync_sig((ii -1)*seg_len + 1:  min(ii*seg_len,mes_syms_len)) = cfo_crt_sig*exp(-j*ang_est);
+					//exp(-j*ang_est) = cos(ang_est) - i * sin(ang_est)
+					if((i+1)*(P_Air_mid_chan_equ_para->I_seg_len)<(P_Air_mid_chan_equ_para->I_mes_syms_len))
+					{
+						for(n=0; n<(P_Air_mid_chan_equ_para->I_seg_len); n++)
+						{
+							D_sync_sig_real_part_out[i * (P_Air_mid_chan_equ_para->I_seg_len) + n] = D_cfo_crt_sig_real[n] * cos(P_Air_mid_chan_equ_para->D_ang_est) + D_cfo_crt_sig_imag[n] * sin(P_Air_mid_chan_equ_para->D_ang_est);
+							D_sync_sig_imag_part_out[i * (P_Air_mid_chan_equ_para->I_seg_len) + n] = D_cfo_crt_sig_imag[n] * cos(P_Air_mid_chan_equ_para->D_ang_est) - D_cfo_crt_sig_real[n] * sin(P_Air_mid_chan_equ_para->D_ang_est);
+						}
+					}
+					else
+					{
+						for(n=0; n<((P_Air_mid_chan_equ_para->I_mes_syms_len) - i * (P_Air_mid_chan_equ_para->I_seg_len)); n++)
+						{
+							D_sync_sig_real_part_out[i * (P_Air_mid_chan_equ_para->I_seg_len) + n] = D_cfo_crt_sig_real[n] * cos(P_Air_mid_chan_equ_para->D_ang_est) + D_cfo_crt_sig_imag[n] * sin(P_Air_mid_chan_equ_para->D_ang_est);
+							D_sync_sig_imag_part_out[i * (P_Air_mid_chan_equ_para->I_seg_len) + n] = D_cfo_crt_sig_imag[n] * cos(P_Air_mid_chan_equ_para->D_ang_est) - D_cfo_crt_sig_real[n] * sin(P_Air_mid_chan_equ_para->D_ang_est);
+						}
+					}
+					// ang_est = mod(ang_est + seg_len*cfo_est,2*pi);
+					//mod(x,y) = x - y * floor(x/y)
+					(P_Air_mid_chan_equ_para->D_ang_est) = ((P_Air_mid_chan_equ_para->D_ang_est) + (P_Air_mid_chan_equ_para->I_seg_len) * (P_Air_mid_chan_equ_para->D_cfo_est)) - 2 * DOUBLE_PI * floor(((P_Air_mid_chan_equ_para->D_ang_est) + (P_Air_mid_chan_equ_para->I_seg_len) * (P_Air_mid_chan_equ_para->D_cfo_est)) / (2 * DOUBLE_PI));
+				}
+				*D_cfo_est_out = (P_Air_mid_chan_equ_para->D_cfo_est);
+				*I_sync_sig_out_len = (P_Air_mid_chan_equ_para->I_mes_syms_len);
+				return 0;	
+			}
+		}

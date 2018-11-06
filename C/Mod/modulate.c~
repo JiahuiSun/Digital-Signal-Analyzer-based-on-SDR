@@ -1,0 +1,55 @@
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	modulate;
+Function Description:
+	对信息序列进行QPSK or DPSK调制;
+Inputs:
+	PI_in_mod			:	待调制信息序列数组指针,PI_in_mod[0]为最高位;
+	PD_out_mod_real_part:	输出QPSK调制后实部信息序列数组指针,PD_out_mod_real_part[0]为最高位;
+	PD_out_mod_imag_part:	输出QPSK调制后虚部信息序列数组指针,PD_out_mod_imag_part[0]为最高位;
+	I_info_len			:	信息序列数组PI_in_mod长度;
+	I_mod_flag			:	调制符："1"QPSK,  "0"DPSK;
+Outputs:
+	返回0:正常;1:信息序列长度错误;
+Notes: //本函数调用的函数清单及其他
+***********************************************************/
+#include "modulate.h"
+
+int modulate(int *PI_in_mod,double *PD_out_mod_real_part,double *PD_out_mod_imag_part,int I_info_len,int I_mod_flag)
+{
+	int i,j;
+	int I_symbol_QPSK;
+	double D_complex_symbol_real_part[4] = {0.7071067811865475, 0.7071067811865475, -0.7071067811865475, -0.7071067811865475};
+	double D_complex_symbol_imag_part[4] = {0.7071067811865475, -0.7071067811865475, 0.7071067811865475, -0.7071067811865475};
+	
+	/*如果长度不正确*/
+	if (I_info_len%2 != 0)
+	{
+		return 1;
+	}
+	/*长度正确*/
+	else
+	{
+		if(I_mod_flag)
+		/*寻找对应实部虚部输出*/
+		{	for(i=0,j=0; i<I_info_len; i+=2,j++)
+			{
+				I_symbol_QPSK = (PI_in_mod[i]<<1) + PI_in_mod[i+1];
+				PD_out_mod_real_part[j] = D_complex_symbol_real_part[I_symbol_QPSK];
+				PD_out_mod_imag_part[j] = D_complex_symbol_imag_part[I_symbol_QPSK];
+			}
+		}
+		else
+		{
+			for(i=0; i<I_info_len; i++)
+			{
+				PD_out_mod_real_part[i]=1.0-2*PI_in_mod[i];
+				PD_out_mod_imag_part[i]=0;
+			}
+			
+		}
+		return 0;
+	}
+}

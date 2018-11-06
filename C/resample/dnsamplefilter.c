@@ -1,0 +1,228 @@
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	dnsamplefilter;
+Function Description:
+	下采样
+Inputs:
+	d_os_sig									：输入，信号
+	os_sig_len									：输入，信号长度
+	P_dnsamplefilter_parameter->os_N            : 输入，
+	P_dnsamplefilter_parameter->filter_order	: 输入，
+	P_dnsamplefilter_parameter->b2				：输入，采样系数
+	P_dnsamplefilter_parameter->b3              : 输入，采样系数
+	P_dnsamplefilter_parameter->forward_sim		：输入，
+	P_dnsamplefilter_parameter_b2_len			：输入，系数长度
+	P_dnsamplefilter_parameter_b3_len			：输入，系数长度
+
+	d_state_rx_dnfs								：输入输出，状态值，二维数组
+	state_rx_dnfs_row							：输入输出，状态值，数组行数
+	state_rx_dnfs_clo							：输入输出，状态值，数组列数
+
+	d_ds_sig								    ：输出，采样后信号
+	ds_sig_len									：输出信号长度
+Outputs:
+	返回0：正常
+	返回1：输入信号长度超设定最大值
+	返回2：输入b2长度超过设定最大值
+	返回3：输入b3长度超过设定最大值
+	返回4：状态值行数超过设定最大值
+	返回5：状态值列数超过设定最大值
+	返回6：no this case happen
+	返回7：no this case happen
+
+Notes: 
+**************************************************************************/
+
+#include "dnsamplefilter.h"
+
+int dnsamplefilter(d_type d_os_sig[],int os_sig_len, Dnsamplefilter_Para *P_dnsamplefilter_parameter, d_type *d_state_rx_dnfs, int state_rx_dnfs_row, int state_rx_dnfs_col, d_type *d_ds_sig, int *ds_sig_len)
+{
+	int i,j;
+	int i_os;
+	int i_result;
+	int i_os_N;
+
+	d_type *state_tx_upfs_tmp;
+	d_type d_params_b[DNSAMPLEFILTER_B_LEN];
+	d_type d_ds_sig_tmp[DNSAMPLEFILTER_OS_SIG_LEN];
+	d_type d_sig_ov[DNSAMPLEFILTER_OS_SIG_LEN];
+
+	if (os_sig_len > DNSAMPLEFILTER_OS_SIG_LEN)
+	{
+		return 1;
+	}
+	
+	if (P_dnsamplefilter_parameter->b2_len > DNSAMPLEFILTER_B_LEN)
+	{
+		return 2;
+	}
+
+	if (P_dnsamplefilter_parameter->b3_len > DNSAMPLEFILTER_B_LEN)
+	{
+		return 3;
+	}
+
+	if (state_rx_dnfs_row > DNSAMPLEFILTER_STATE_RX_DNFS_ROW)
+	{
+		return 4;
+	}
+
+	if (state_rx_dnfs_col > DNSAMPLEFILTER_STATE_RX_DNFS_COL)
+	{
+		return 5;
+	}
+
+	for (i=0; i<os_sig_len; i++)
+	{
+		d_ds_sig_tmp[i] = d_os_sig[i];
+	}
+
+	i_os_N = P_dnsamplefilter_parameter->os_N;
+
+	for (i=0; i<(P_dnsamplefilter_parameter->filter_order); i++)
+	{
+		if ((i_os_N) % 2 == 0)
+		{
+			i_os = 2;
+			for (j=0; j<P_dnsamplefilter_parameter->b2_len; j++)
+			{
+				d_params_b[j] = P_dnsamplefilter_parameter->b2[j];
+			}
+		}
+		else if ((i_os_N) % 3 == 0)
+		{
+			i_os = 3;
+			for (j=0; j<P_dnsamplefilter_parameter->b2_len; j++)
+			{
+				d_params_b[j] = P_dnsamplefilter_parameter->b3[j];
+			}
+		}
+		else if ((i_os_N) == 1)
+			return 6;
+		else
+			return 7;
+
+		i_os_N = (i_os_N) / i_os;
+		state_tx_upfs_tmp = (d_state_rx_dnfs + state_rx_dnfs_col*i);     /*将每一个行的首地址赋给state_tx_upfs_tmp*/
+		i_result = shape_filter(d_ds_sig_tmp, os_sig_len, d_sig_ov, d_params_b, P_dnsamplefilter_parameter->b2_len, state_tx_upfs_tmp);
+
+		if (P_dnsamplefilter_parameter->forward_sim == 0)
+		{
+			for (j=0; j<state_rx_dnfs_col; j++)
+			{
+				d_ds_sig_tmp[os_sig_len + (i+1)*j] = d_state_rx_dnfs[i*state_rx_dnfs_col+j];
+			}
+		}
+
+		for (j=0; j<os_sig_len; j=j+i_os)
+		{
+			d_ds_sig_tmp[j/i_os]=d_sig_ov[j];
+		}
+
+		os_sig_len = os_sig_len / i_os;
+	}
+
+	for (i=0; i<os_sig_len; i++)
+	{
+		d_ds_sig[i] = d_ds_sig_tmp[i];
+	}
+	*ds_sig_len = os_sig_len;
+	return 0;
+}
+
+int dnsamplefilter_offset(d_type d_os_sig[],int os_sig_len, Dnsamplefilter_Para *P_dnsamplefilter_parameter, d_type *d_state_rx_dnfs, int state_rx_dnfs_row, int state_rx_dnfs_col, d_type *d_ds_sig, int offset, int *ds_sig_len)
+{
+	int i,j;
+	int i_os;
+	int i_result;
+	int i_os_N;
+
+	d_type *state_tx_upfs_tmp;
+	d_type d_params_b[DNSAMPLEFILTER_B_LEN];
+	d_type d_ds_sig_tmp[DNSAMPLEFILTER_OS_SIG_LEN];
+	d_type d_sig_ov[DNSAMPLEFILTER_OS_SIG_LEN];
+
+	if (os_sig_len > DNSAMPLEFILTER_OS_SIG_LEN)
+	{
+		return 1;
+	}
+	
+	if (P_dnsamplefilter_parameter->b2_len > DNSAMPLEFILTER_B_LEN)
+	{
+		return 2;
+	}
+
+	if (P_dnsamplefilter_parameter->b3_len > DNSAMPLEFILTER_B_LEN)
+	{
+		return 3;
+	}
+
+	if (state_rx_dnfs_row > DNSAMPLEFILTER_STATE_RX_DNFS_ROW)
+	{
+		return 4;
+	}
+
+	if (state_rx_dnfs_col > DNSAMPLEFILTER_STATE_RX_DNFS_COL)
+	{
+		return 5;
+	}
+
+	for (i=0; i<os_sig_len; i++)
+	{
+		d_ds_sig_tmp[i] = d_os_sig[i];
+	}
+
+	i_os_N = P_dnsamplefilter_parameter->os_N;
+
+	for (i=0; i<(P_dnsamplefilter_parameter->filter_order); i++)
+	{
+		if ((i_os_N) % 2 == 0)
+		{
+			i_os = 2;
+			for (j=0; j<P_dnsamplefilter_parameter->b2_len; j++)
+			{
+				d_params_b[j] = P_dnsamplefilter_parameter->b2[j];
+			}
+		}
+		else if ((i_os_N) % 3 == 0)
+		{
+			i_os = 3;
+			for (j=0; j<P_dnsamplefilter_parameter->b2_len; j++)
+			{
+				d_params_b[j] = P_dnsamplefilter_parameter->b3[j];
+			}
+		}
+		else if ((i_os_N) == 1)
+			return 6;
+		else
+			return 7;
+
+		i_os_N = (i_os_N) / i_os;
+		state_tx_upfs_tmp = (d_state_rx_dnfs + state_rx_dnfs_col*i);     /*将每一个行的首地址赋给state_tx_upfs_tmp*/
+		i_result = shape_filter(d_ds_sig_tmp, os_sig_len, d_sig_ov, d_params_b, P_dnsamplefilter_parameter->b2_len, state_tx_upfs_tmp);
+
+		if (P_dnsamplefilter_parameter->forward_sim == 0)
+		{
+			for (j=0; j<state_rx_dnfs_col; j++)
+			{
+				d_ds_sig_tmp[os_sig_len + (i+1)*j] = d_state_rx_dnfs[i*state_rx_dnfs_col+j];
+			}
+		}
+
+		for (j=0; j<os_sig_len; j=j+i_os)
+		{
+			d_ds_sig_tmp[j/i_os]=d_sig_ov[j];
+		}
+
+		os_sig_len = os_sig_len / i_os;
+	}
+
+	for (i=0; i<os_sig_len; i++)
+	{
+		d_ds_sig[i+offset] = d_ds_sig_tmp[i];
+	}
+	*ds_sig_len = os_sig_len;
+	return 0;
+}

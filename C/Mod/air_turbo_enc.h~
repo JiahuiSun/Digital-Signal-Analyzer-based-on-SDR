@@ -1,0 +1,6 @@
+#include <string.h>
+#include <malloc.h>
+//#include "..\..\head_file\common.h"
+//#include "..\..\head_file\func_CSM.h"
+
+int air_turbo_enc(int *PI_in_turbo_enc, int I_code_length, int *PD_out_turbo_enc,int I_out_len);

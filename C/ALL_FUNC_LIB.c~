@@ -1,0 +1,3838 @@
+#include "type_CSM.h"
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_crc_add_or_check;
+Function Description:
+	增加CRC校验位:输入PI_info_without_crc,在原信息比特后加指定位数的CRC校验码,输出PI_info_with_crc;
+	校验并去除CRC校验位:输入PI_info_with_crc,校验正确:去除校验位信息比特,输出PI_info_without_crc;校验不正确:PI_info_without_crc未作更改;
+Inputs:
+	PI_info_with_crc;带CRC校验位数组指针,PI_info_with_crc[0]为最高位;
+	PI_info_without_crc;不带CRC校验位数组指针,PI_info_without_crc[0]为最高位;
+	I_crc_type;CRC校验类型,有3,5,8,12,16;I_info_len;PI_info_without_crc长度;B_add_or_check;0为add,1为check;
+Outputs:
+	返回0;加CRC校验位正常;1;CRC校验正确;2;为CRC校验错误;3;生成多项式参数错误;
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_crc_add_or_check(int *PI_info_with_crc,int *PI_info_without_crc,int I_crc_type,int I_info_len,int B_add_or_check)
+{
+	unsigned long UL_in_reg = 0;
+	unsigned long UL_crc_poly;
+
+	int i;	
+	
+	/*选取生成多项式*/
+	switch (I_crc_type)
+	{
+		case 3:
+			UL_crc_poly = 11;
+			break;
+		case 5:
+			UL_crc_poly = 47;
+			break;
+		case 8:
+			UL_crc_poly = 411;
+			break;
+		case 12:
+			UL_crc_poly = 6159;
+			break;
+		case 16:
+			UL_crc_poly = 69665;
+			break;
+		default:
+			/*生成多项式参数错误*/
+			return 3;
+			break;
+	}
+
+	/*将PI_info_with_crc赋值,为{PI_info_without_crc}+{校验位数个0}*/
+	if (!B_add_or_check)
+	{
+		memcpy(PI_info_with_crc,PI_info_without_crc,I_info_len*sizeof(int));
+
+		for(i=I_info_len; i<I_info_len+I_crc_type; i++)
+		{
+			PI_info_with_crc[i] = 0;
+		}
+	}
+
+	/*将PI_info_with_crc存入reg,并模二除poly*/
+	for(i=0; i<I_info_len+I_crc_type; i++)
+	{
+		UL_in_reg <<= 1;
+		UL_in_reg += (PI_info_with_crc[i]&1);
+		if(UL_in_reg & (1<<I_crc_type)) 
+		{
+			UL_in_reg ^= UL_crc_poly;
+		}
+	}
+
+	/*如果是check CRC*/
+	if (B_add_or_check)
+	{
+		if(UL_in_reg == 0)
+		{
+			/*将输出数组赋值,为无CRC校验位的源信息比特*/
+			for(i=0; i<I_info_len; i++)
+			{
+				PI_info_without_crc[i] = PI_info_with_crc[i];
+			}
+			return 1;
+		}
+		else
+		{
+			return 2;
+		}
+	}
+	/*如果是add CRC*/
+	else
+	{
+		/*保存余数*/
+		for(;i>I_info_len;)
+		{
+			i--;
+			PI_info_with_crc[i] = UL_in_reg&1;
+			UL_in_reg >>= 1;
+		}
+
+		/*给PI_info_with_crc信息位赋值*/
+		memcpy(PI_info_with_crc,PI_info_without_crc,I_info_len*sizeof(int));
+
+		/*正常*/
+		return 0;
+	}
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_scramble;
+Function Description:
+	对信息序列加扰或者解扰;
+Inputs:
+	PI_in_scramble	:待加扰或者解扰信息序列数组指针,PI_in_scramble[0]为最高位;
+	PI_out_scramble	:输出信息序列数组指针,PI_out_scramble[0]为最高位;
+	PI_reg_ini		:寄存器初始化信息序列数组指针,PI_reg_ini[0]为最高位，即D15;
+	PI_scramble_poly:生成多项式信息序列数组指针,PI_scramble_poly[0]为最高位,即D15;
+	I_sc_info_len	:信息序列数组长度;
+Outputs:
+	返回0;正常;
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_scramble(int *PI_in_scramble,int *PI_out_scramble,int *PI_reg_ini,int *PI_scramble_poly,int I_sc_info_len)
+{
+	unsigned int UI_num_of_1=0,UI_reg_scramble=0,UI_reg_poly=0,UI_reg_new=0,UI_reg_pi=0,UI_reg_po=0;
+	int i,j,z;
+
+	/*将寄存器初始状态存入UI_reg_scramble
+    注意！PI_reg_ini[0]为最高位，即D15*/
+	for(i=0; i<15; i++)
+	{
+		UI_reg_scramble <<= 1;
+		UI_reg_scramble += (PI_reg_ini[i]&1);
+	}
+
+	/*将生成多项式存入UI_reg_poly
+    注意！PI_scramble_poly[0]为最高位,即D15*/
+	for(i=0; i<15; i++)
+	{
+		UI_reg_poly <<= 1;
+		UI_reg_poly += (PI_scramble_poly[i]&1);
+	}
+
+	/*扰码*/
+	for(j=0; j<I_sc_info_len; )
+	{
+	    /*reg产生16位新状态*/
+		for(i=0; i<16; i++)
+		{
+			UI_reg_new = (UI_reg_scramble&UI_reg_poly);
+			for(z=0; z<16; z++)
+			{
+				if((UI_reg_new>>z)&1)
+				{
+					UI_num_of_1++;
+				}
+			}
+			UI_reg_scramble <<= 1;
+			UI_reg_scramble += (UI_num_of_1&1);
+			UI_num_of_1 = 0;
+		}
+
+		/*将PI_in_scramble中16位信息存入UI_reg_pi*/
+		for(i=0; i<16; i++,j++)
+		{
+			UI_reg_pi <<= 1;
+			if(j<I_sc_info_len)
+			{
+				UI_reg_pi += (PI_in_scramble[j]&1);
+			}
+		}
+		/*对16位信息扰码*/
+		UI_reg_po = (UI_reg_pi^UI_reg_scramble);
+
+		/*输出16位信息*/
+		for(i=0; i<16; i++)
+		{
+			if((j-i)<=I_sc_info_len)
+			{
+				PI_out_scramble[j-i-1] = (UI_reg_po&1);
+			}
+			UI_reg_po >>= 1;
+		}
+	}
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_de_scramble;
+Function Description:
+	对信息序列加扰或者解扰;
+Inputs:
+	PI_in_de_scramble	:解扰信息序列数组指针,PI_in_de_scramble[0]为最高位;
+	PI_out_de_scramble	:输出信息序列数组指针,PI_out_de_scramble[0]为最高位;
+	PI_reg_ini			:寄存器初始化信息序列数组指针,PI_reg_ini[0]为最高位，即D15;
+	PI_scramble_poly	:生成多项式信息序列数组指针,PI_scramble_poly[0]为最高位,即D15;
+	I_info_len			:信息序列数组长度;
+Outputs:
+	返回0;正常;
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_de_scramble(int *PI_in_de_scramble,int *PI_out_de_scramble,int *PI_reg_ini,int *PI_scramble_poly,int I_info_len)
+{
+	unsigned int UI_num_of_1=0;
+	unsigned int UI_reg_scramble=0;
+	unsigned int UI_reg_poly=0;
+	unsigned int UI_reg_new=0;
+	unsigned int UI_reg_pi=0;
+	unsigned int UI_reg_po=0;
+	int PI_scramble[16];
+	int i,j,z;
+
+	/*将寄存器初始状态存入UI_reg_scramble
+    注意！PI_reg_ini[0]为最高位，即D15*/
+	for(i=0; i<15; i++)
+	{
+		UI_reg_scramble <<= 1;
+		UI_reg_scramble += (PI_reg_ini[i]&1);
+	}
+
+	/*将生成多项式存入UI_reg_poly
+    注意！PI_scramble_poly[0]为最高位,即D15*/
+	for(i=0; i<15; i++)
+	{
+		UI_reg_poly <<= 1;
+		UI_reg_poly += (PI_scramble_poly[i]&1);
+	}
+
+	/*扰码*/
+	for(j=0; j<I_info_len; )
+	{
+	    /*reg产生16位新状态*/
+		for(i=0; i<16; i++)
+		{
+			UI_reg_new = (UI_reg_scramble&UI_reg_poly);
+			for(z=0; z<16; z++)
+			{
+				if((UI_reg_new>>z)&1)
+				{
+					UI_num_of_1++;
+				}
+			}
+			UI_reg_scramble <<= 1;
+			UI_reg_scramble += (UI_num_of_1&1);
+			PI_scramble[i] = (UI_num_of_1&1);
+			UI_num_of_1 = 0;
+		}
+
+		j += 16;
+
+		/*输出16位信息*/
+		for(i=0; i<16; i++)
+		{
+			if((j-i)<=I_info_len)
+			{
+				if (PI_scramble[15-i])
+				{
+					PI_out_de_scramble[j-i-1] = -PI_in_de_scramble[j-i-1];
+				}
+				else
+				{
+					PI_out_de_scramble[j-i-1] = PI_in_de_scramble[j-i-1];
+				}
+			}
+		}
+	}
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_QPSK;
+Function Description:
+	对信息序列进行QPSK调制;
+Inputs:
+	PI_in_QPSK;待调制信息序列数组指针,PI_in_QPSK[0]为最高位;
+	PD_out_QPSK_real_part;输出QPSK调制后实部信息序列数组指针,PD_out_QPSK_real_part[0]为最高位;
+	PD_out_QPSK_imag_part;输出QPSK调制后虚部信息序列数组指针,PD_out_QPSK_imag_part[0]为最高位;
+	I_info_len:信息序列数组PI_in_QPSK长度;
+Outputs:
+	返回0:正常;1:信息序列长度错误;
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_QPSK(int *PI_in_QPSK,double *PD_out_QPSK_real_part,double *PD_out_QPSK_imag_part,int I_info_len)
+{
+	int i,j;
+	int I_symbol_QPSK;
+	double D_complex_symbol_real_part[4] = {0.7071067811865475, -0.7071067811865475, 0.7071067811865475, -0.7071067811865475};
+	double D_complex_symbol_imag_part[4] = {0.7071067811865475, 0.7071067811865475, -0.7071067811865475, -0.7071067811865475};
+	
+	/*如果长度不正确*/
+	if (I_info_len%2 != 0)
+	{
+		return 1;
+	}
+	/*长度正确*/
+	else
+	{
+		/*寻找对应实部虚部输出*/
+		for(i=0,j=0; i<I_info_len; i+=2,j++)
+		{
+			I_symbol_QPSK = (PI_in_QPSK[i]<<1) + PI_in_QPSK[i+1];
+			PD_out_QPSK_real_part[j] = D_complex_symbol_real_part[I_symbol_QPSK];
+			PD_out_QPSK_imag_part[j] = D_complex_symbol_imag_part[I_symbol_QPSK];
+		}
+
+		return 0;
+	}
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_8PSK;
+Function Description:
+	对信息序列进行8PSK调制;
+Inputs:
+	PI_in_8PSK;待调制信息序列数组指针,PI_in_8PSK[0]为最高位;
+	PD_out_8PSK_real_part;输出8PSK调制后实部信息序列数组指针,PD_out_8PSK_real_part[0]为最高位;
+	PD_out_8PSK_imag_part;输出8PSK调制后虚部信息序列数组指针,PD_out_8PSK_imag_part[0]为最高位;
+	I_info_len:信息序列数组PI_in_8PSK长度;
+Outputs:
+	返回0:正常;1:信息序列长度错误;
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_8PSK(int *PI_in_8PSK,double *PD_out_8PSK_real_part,double *PD_out_8PSK_imag_part,int I_info_len)
+{
+	int i,j;
+	int I_symbol_8PSK;
+	double sqr = sqrt(2.0)/2;
+	double PD_complex_symbol_real_part[8] = {1.0,sqr,-sqr,0,sqr,0.0,-1.0,-sqr};
+	double PD_complex_symbol_imag_part[8] = {0.0,sqr,sqr,1.0,-sqr,-1.0,0.0,-sqr};
+	
+
+	/*如果长度不正确*/
+	if (I_info_len%3 != 0)
+	{
+		return 1;
+	}
+	/*长度正确*/
+	else
+	{
+		/*寻找对应实部虚部输出*/
+		for(i=0,j=0; i<I_info_len; i+=3,j++)
+		{
+			I_symbol_8PSK = (PI_in_8PSK[i]<<2) + (PI_in_8PSK[i+1]<<1) + PI_in_8PSK[i+2];
+			PD_out_8PSK_real_part[j] = PD_complex_symbol_real_part[I_symbol_8PSK];
+			PD_out_8PSK_imag_part[j] = PD_complex_symbol_imag_part[I_symbol_8PSK];
+		}
+
+		return 0;
+	}
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_CQPSK(π/4);
+Function Description:
+	对信息序列进行CSM_CQPSK(π/4)调制;
+Inputs:
+	PI_in_CQPSK				:待调制信息序列数组指针,PI_in_8PSK[0]为最高位;
+	PD_out_CQPSK_real_part	:输出CSM_CQPSK(π/4)调制后实部信息序列数组指针,PD_out_8PSK_real_part[0]为最高位;
+	PD_out_CQPSK_imag_part	:输出CSM_CQPSK(π/4)调制后虚部信息序列数组指针,PD_out_8PSK_imag_part[0]为最高位;
+	I_info_len				:信息序列数组PI_in_CQPSK长度;
+	I_modulate_offset		:调制偏移量
+Outputs:
+	返回0:正常;
+	返回1:信息序列长度错误;
+Notes: 
+***********************************************************/
+int CSM_CQPSK(int *PI_in_CQPSK,double *PD_out_CQPSK_real_part,double *PD_out_CQPSK_imag_part,int I_info_len,int I_modulate_offset)
+{
+	int i,j;
+	int I_symbol_CQPSK;
+	int I_tran_tmp;
+	double sqr = sqrt(2.0)/2;
+	double D_complex_symbol_real_part[8] = {1.0,sqr,0.0,-sqr,-1.0,-sqr, 0.0, sqr};
+	double D_complex_symbol_imag_part[8] = {0.0,sqr,1.0, sqr, 0.0,-sqr,-1.0,-sqr};
+	int I_tran_table[4] = {0,2,6,4};
+	
+	/*如果长度不正确*/
+	if ((I_info_len%2)!=0 || I_info_len<0)
+	{
+		return 1;
+	}
+	/*长度正确*/
+	else
+	{
+		/*查表输出*/
+		for(i=0,j=0; i<I_info_len; i+=2,j++)
+		{
+			I_tran_tmp = I_tran_table[(PI_in_CQPSK[i]<<1) + (PI_in_CQPSK[i+1])];
+			I_symbol_CQPSK = (I_tran_tmp+I_modulate_offset+j) & 7;
+			PD_out_CQPSK_real_part[j] = D_complex_symbol_real_part[I_symbol_CQPSK];
+			PD_out_CQPSK_imag_part[j] = D_complex_symbol_imag_part[I_symbol_CQPSK];
+		}
+
+		return 0;
+	}
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_de_QPSK;
+Function Description:
+	对信息序列进行QPSK解调;
+Inputs:
+	PD_in_QPSK_real_part;输入待QPSK解调实部信息序列数组指针,PD_in_QPSK_real_part[0]为最高位;
+	PD_in_QPSK_imag_part;输出待QPSK解调虚部信息序列数组指针,PD_in_QPSK_imag_part[0]为最高位;
+	PI_out_de_QPSK;待解调信息序列数组指针,PI_out_de_QPSK[0]为最高位;
+	I_info_len:信息序列数组PI_out_de_QPSK长度;
+Outputs:
+	返回0:正常;1:信息序列长度错误;
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_de_QPSK(double *PD_in_QPSK_real_part, double *PD_in_QPSK_imag_part, double *PD_out_LLR_de_QPSK, int I_info_len, double D_sigma_sqr)
+{
+	int i,j;
+	double D_LLR_low_de_QPSK = 0;
+	double D_LLR_high_de_QPSK = 0;
+	
+	/*如果长度不正确*/
+	if (I_info_len%2 != 0)
+	{
+		return 1;
+	}
+	/*长度正确*/
+	else
+	{
+		/*计算LLR*/
+		for(i=0,j=0; i<I_info_len/2; j+=2,i++)
+		{
+			PD_out_LLR_de_QPSK[j]   = -2*1.41421*PD_in_QPSK_imag_part[i] / D_sigma_sqr;
+			PD_out_LLR_de_QPSK[j+1] = -2*1.41421*PD_in_QPSK_real_part[i] / D_sigma_sqr;
+		}
+
+		return 0;
+	}
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_de_CQPSK;
+Function Description:
+	对信息序列进行CQPSK解调;
+Inputs:
+	注意：输入为去除相位旋转后的QPSK信号；
+	PD_in_CQPSK_real_part;输入待CQPSK解调实部信息序列数组指针,PD_in_CQPSK_real_part[0]为最高位;
+	PD_in_CQPSK_imag_part;输出待CQPSK解调虚部信息序列数组指针,PD_in_CQPSK_imag_part[0]为最高位;
+	PI_out_de_CQPSK;待解调信息序列数组指针,PI_out_de_CQPSK[0]为最高位;
+	I_info_len:信息序列数组PI_out_de_CQPSK长度;
+Outputs:
+	返回0:正常;1:信息序列长度错误;
+Notes: 注意：输入为去除相位旋转后的QPSK信号；
+***********************************************************/
+int CSM_de_CQPSK(double *PD_in_CQPSK_real_part, double *PD_in_CQPSK_imag_part, double *PD_out_LLR_de_CQPSK, int I_info_len, double D_sigma_sqr)
+{
+	int i,j;
+	double D_LLR_low_de_CQPSK = 0;
+	double D_LLR_high_de_CQPSK = 0;
+	
+	/*如果长度不正确*/
+	if (I_info_len%2 != 0)
+	{
+		return 1;
+	}
+	/*长度正确*/
+	else
+	{
+		/*计算LLR，判决*/
+		for(i=0,j=0; i<I_info_len/2; j+=2,i++)
+		{
+			PD_out_LLR_de_CQPSK[j] = -(PD_in_CQPSK_real_part[i]+PD_in_CQPSK_imag_part[i]) / D_sigma_sqr;
+			PD_out_LLR_de_CQPSK[j+1] = (PD_in_CQPSK_imag_part[i]-PD_in_CQPSK_real_part[i]) / D_sigma_sqr;
+		}
+
+		return 0;
+	}
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_de_8PSK;
+Function Description:
+	对信息序列进行8PSK解调;
+Inputs:
+	PD_in_8PSK_real_part;输入待8PSK解调实部信息序列数组指针,PD_in_8PSK_real_part[0]为最高位;
+	PD_in_8PSK_imag_part;输出待8PSK解调虚部信息序列数组指针,PD_in_8PSK_imag_part[0]为最高位;
+	PI_out_de_8PSK;待解调信息序列数组指针,PI_out_de_8PSK[0]为最高位;
+	I_info_len:信息序列数组PI_out_de_8PSK长度;
+	D_sigma:噪声标准差;
+Outputs:
+	返回0:正常;
+	返回1:信息序列长度错误;
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_de_8PSK(double *PD_in_8PSK_real_part, double *PD_in_8PSK_imag_part, double *PD_out_LLR_de_8PSK, int I_info_len, double D_sigma_sqr)
+{
+	int i,j,k,m;
+	double sqr = sqrt(2.0)/2;
+	double D_div_up = 0;
+	double D_div_down = 0;
+	double D_mod_sqr = 0;
+	double D_tmp_8PSK_real_part = 0;
+	double D_tmp_8PSK_imag_part = 0;
+	int PI_table[3][8] = {{4,5,6,7,0,1,2,3},{2,3,4,5,6,7,0,1},{1,2,5,6,3,4,7,0}};
+	double PD_de_8PSK_real_part[8] = {1,sqr,0,-sqr,-1,-sqr, 0, sqr};
+	double PD_de_8PSK_imag_part[8] = {0,sqr,1, sqr, 0,-sqr,-1,-sqr};
+
+	/*如果长度不正确*/
+	if (I_info_len%3 != 0 || I_info_len<0)
+	{
+		return 1;
+	}
+	/*如果标准差为0*/
+	else if (D_sigma_sqr < 1E-6)
+	{
+		return 2;
+	}
+	/*正常*/
+	else
+	{
+		/*计算LLR*/
+		for (i=0,j=0; i<I_info_len/3; i++)
+		{
+			/*计算出3位*/
+			for (m=0; m<3; m++,j++)
+			{
+				for (k=0; k<8; k++)
+				{
+					/*赋值*/
+					D_tmp_8PSK_real_part = PD_in_8PSK_real_part[i];
+					D_tmp_8PSK_imag_part = PD_in_8PSK_imag_part[i];
+					/*求值*/
+					D_tmp_8PSK_real_part -= PD_de_8PSK_real_part[PI_table[m][k]];
+					D_tmp_8PSK_imag_part -= PD_de_8PSK_imag_part[PI_table[m][k]];
+					D_mod_sqr = D_tmp_8PSK_real_part*D_tmp_8PSK_real_part + D_tmp_8PSK_imag_part*D_tmp_8PSK_imag_part;
+					if (k < 4)
+					{
+						/*分子*/
+						D_div_up += exp(-D_mod_sqr/D_sigma_sqr);
+					}
+					else
+					{
+						/*分母*/
+						D_div_down += exp(-D_mod_sqr/D_sigma_sqr);
+					}
+				}
+					/*LLR输出*/
+					PD_out_LLR_de_8PSK[j] = log(D_div_up/D_div_down);
+					/*清零*/
+					D_div_up = 0;
+					D_div_down = 0;
+			
+			}
+		}
+
+		return 0;
+	}
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_intraburst_interleave;
+Function Description:
+	突发内交织;行*列外个余数比特不参与交织，不做处理;
+Inputs:
+	PI_in_interleave:输入待交织信息序列数组指针;
+	PI_out_interleave:输出交织后信息序列数组指针;
+	PI_jp:交织置乱序列数组指针,不包含0,数值从1开始;
+	PI_row:行数;
+	PI_col:列数;
+Outputs:
+	返回0:正常;
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_intraburst_interleave(int *PI_in_interleave, int *PI_out_interleave, int *PI_jp, int PI_row, int PI_col)
+{
+	int i,j,z = 0;
+	
+	for(i=0; i<PI_col; i++)
+	{
+		/*判断置乱数值是否合法*/
+		if(PI_jp[i]<1 || PI_jp[i]>PI_col)
+		{
+			return 1;
+		}
+		/*置乱*/
+		else
+		{
+			for(j=0; j<PI_row; j++)
+			{
+				PI_out_interleave[z++] = PI_in_interleave[PI_jp[i]+PI_col*j-1];
+			}
+		}
+	}
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_de_intraburst_interleave;
+Function Description:
+	突发内解交织;行*列外个余数比特不参与交织，不做处理;
+Inputs:
+	PD_in_de_interleave	:输入待解交织信息序列数组指针;
+	PD_out_de_interleave:输出解交织后信息序列数组指针;
+	PI_jp				:交织置乱序列数组指针,不包含0,数值从1开始;
+	PI_row				:行数;
+	PI_col				:列数;
+Outputs:
+	返回0:正常;
+	返回1:置乱数值不合法;
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_de_intraburst_interleave(double *PD_in_de_interleave, double *PD_out_de_interleave, int *PI_jp, int PI_row, int PI_col)
+{
+	int i,j,z = 0;
+	
+	for(i=0; i<PI_col; i++)
+	{
+		/*判断置乱数值是否合法*/
+		if(PI_jp[i]<1 || PI_jp[i]>PI_col)
+		{
+			return 1;
+		}
+		/*置乱*/
+		else
+		{
+			for(j=0; j<PI_row; j++)
+			{
+				PD_out_de_interleave[PI_jp[i]+PI_col*j-1] = PD_in_de_interleave[z++];
+			}
+		}
+	}
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_interburst_interleave;
+Function Description:
+	突发间交织，3个突发组成一个矩阵;
+Inputs:
+	PI_in_interbust_inter	:输入一个突发的待交织信息序列数组指针;
+	PI_out_interbust_inter	:输出一个突发的交织后信息序列数组指针;
+	PI_buffer				:缓冲区数组指针，存储前2个突发信息,长度为2倍的突发信息长度，初始值为全零;
+	I_info_len				:一个突发的信息序列长度，长度不可大于5000;
+Outputs:
+	返回0:正常;
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_interburst_interleave(int *PI_in_interbust_inter, int *PI_out_interbust_inter, int *PI_en_interleave_buffer, int I_info_len)
+{
+	int i = 0,j;
+	int *(p[3]) = {PI_in_interbust_inter,PI_en_interleave_buffer,PI_en_interleave_buffer+I_info_len};
+
+	/*交织输出*/
+	for(i=0; i<I_info_len; i++)
+	{
+		PI_out_interbust_inter[i] = *(p[i%3] + i);
+	}
+
+	/*更新缓冲区*/
+	memcpy(p[2], p[1], (I_info_len*sizeof(int)));
+	memcpy(p[1], p[0], (I_info_len*sizeof(int)));
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_de_interburst_interleave;
+Function Description:
+	突发间解交织，3个突发组成一个矩阵;
+Inputs:
+	PD_in_de_interbust_inter	:输入单个突发的待解交织信息序列数组指针;
+	PD_out_de_interbust_inter	:输出单个突发的解交织后信息序列数组指针;
+	PD_de_interleave_buffer		:缓冲区数组指针，存储前2个突发信息,长度为2倍的突发信息长度，初始值为全零;
+	I_info_len					:单个突发的信息序列长度，长度不可大于5000;
+Outputs:
+	返回0:正常;
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_de_interburst_interleave(double *PD_in_de_interbust_inter, double *PD_out_de_interbust_inter, double *PD_de_interleave_buffer, int I_info_len)
+{
+	int i = 0,j;
+	double *PD_tmp_buffer_pointer[3] = {PD_in_de_interbust_inter,PD_de_interleave_buffer,PD_de_interleave_buffer+I_info_len};
+
+	/*交织输出*/
+	for(i=0; i<I_info_len; i++)
+	{
+		PD_out_de_interbust_inter[i] = *(PD_tmp_buffer_pointer[2-i%3] + i);
+	}
+
+	/*更新缓冲区*/
+	memcpy(PD_tmp_buffer_pointer[2], PD_tmp_buffer_pointer[1], (I_info_len*sizeof(double)));
+	memcpy(PD_tmp_buffer_pointer[1], PD_tmp_buffer_pointer[0], (I_info_len*sizeof(double)));
+
+	return 0;
+
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_golay_enc;
+Function Description:
+	golay编码;
+Inputs:
+	PI_in_golay_enc		:输入待编码信息序列数组指针;
+	PI_out_golay_enc	:输出编码后信息序列数组指针;
+	I_in_info_len		:信息序列长度;
+	PI_golay_matrix_B	:编码矩阵;
+Outputs:
+	返回0:正常;
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_golay_enc(int *PI_in_golay_enc, int *PI_out_golay_enc, int I_in_info_len, int *PI_golay_matrix_B)
+{
+	int i;
+	int j;
+	int I_matrix_reg = 0;
+	int I_info_reg = 0;
+	int I_mul_reg = 0;
+	int num_of_1 = 0;
+
+	/*复制前I_in_info_len位*/
+	memcpy(PI_out_golay_enc, PI_in_golay_enc, I_in_info_len*(sizeof(int)));
+
+	/*信息存入reg*/
+	for(i=0; i<I_in_info_len; i++)
+	{
+		I_info_reg = I_info_reg<<1;
+		I_info_reg = I_info_reg + PI_in_golay_enc[i];
+	}
+
+	for(j=0; j<I_in_info_len; j++)
+	{
+		/*矩阵列存入reg*/
+		for(i=0; i<I_in_info_len; i++)
+		{
+			I_matrix_reg = I_matrix_reg<<1;
+			I_matrix_reg = I_matrix_reg ^ PI_golay_matrix_B[i*I_in_info_len+j];
+		}
+		
+		/*矩阵列与信息序列相乘*/
+		I_mul_reg = I_matrix_reg & I_info_reg;
+
+		for(i=0; i<I_in_info_len; i++)
+		{
+			if((I_mul_reg>>i) & 1)
+			{
+				num_of_1 = num_of_1 ^ 1;
+			}
+		}
+		
+		/*赋值第I_in_info_len+j位*/
+		PI_out_golay_enc[I_in_info_len+j] = num_of_1;
+		num_of_1 = 0;
+	}
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_golay_dec;
+Function Description:
+	golay译码;
+Inputs:
+	PD_in_golay_dec		:	输入信息序列指针；
+	I_info_len			：	输入信息序列长度,为12；	
+	PI_out_golay_dec	：	输出信息序列指针；
+	PI_sum_error		：	输出汉明距；
+	PI_golay_matrix_B	：	golay矩阵，12*12，144位;
+	B_LLR_or_not		：	（1）LLR软判决输出 或者 （0）硬判输出;
+Outputs:
+	返回0:正常;
+	返回1：输入长度不正确;
+Notes:
+***********************************************************/
+int CSM_golay_dec(double *PD_in_golay_dec, int *PI_out_golay_dec, int I_info_len, int *PI_sum_error, int *PI_golay_matrix_B, int B_LLR_or_not)
+{
+	int i,j,z;
+	int I_hard_deci[24] = {0};
+	int I_col_mul[12] = {0};
+	int I_max_index = 0;
+	double D_max_abs = 0;
+	int I_candi = 0;
+	int I_candi_enc[24] = {0};
+	double D_LR[4096] = {0};
+
+	*PI_sum_error = 0;
+
+	/*检查信息长度*/
+	if(I_info_len != 12)
+	{
+		return 1;
+	}
+
+	/*硬判决存入I_hard_deci*/
+	for(i=0; i<2*I_info_len; i++)
+	{
+		if(PD_in_golay_dec[i] > 0)
+		{
+			I_hard_deci[i] = 1;
+		}
+	}
+
+	/*H = [eye(12),B],(H*r)%2;*/
+	for(i=0; i<I_info_len; i++)
+	{
+		for(j=0; j<I_info_len; j++)
+		{
+			I_col_mul[i] ^= I_hard_deci[I_info_len+j] & PI_golay_matrix_B[j+i*I_info_len];
+		}
+		I_col_mul[i] ^= I_hard_deci[i];
+		*PI_sum_error += I_col_mul[i];
+	}
+	
+	/*小于最小汉明距的输出*/
+	if(*PI_sum_error<4 || !B_LLR_or_not)
+	{
+		for(i=0; i<I_info_len; i++)
+		{
+			PI_out_golay_dec[i] = I_hard_deci[i] ^ I_col_mul[i];
+		}
+		return 0;
+	}
+
+	/*3以上*/
+	else
+	{
+		while(I_candi < 4096)
+		{
+			/*G = [eye(12),B],(candi*G)%2)*/
+			for(i=0; i<I_info_len; i++)
+			{
+				I_candi_enc[i] = (I_candi>>i) & 1;
+			}
+			for(i=0; i<I_info_len; i++)
+			{
+				I_col_mul[i] = 0;
+				for(j=0; j<I_info_len; j++)
+				{
+					I_col_mul[i] ^= ((I_candi>>j) & PI_golay_matrix_B[j*I_info_len+i]);
+				}
+				I_candi_enc[I_info_len+i] = I_col_mul[i];
+			}
+
+			/*计算似然比*/
+			for(i=0; i<2*I_info_len; i++)
+			{
+				D_LR[I_candi] += (2*I_candi_enc[i]-1) * PD_in_golay_dec[i];
+			}
+			
+			I_candi++;
+		}
+
+		/*找最大*/
+		D_max_abs = D_LR[0];
+		for(i=1; i<4096; i++)
+		{
+			if(D_max_abs < D_LR[i])
+			{
+				I_max_index = i;
+				D_max_abs = D_LR[i];
+			}
+		}
+
+		/*输出*/
+		for(i=0; i<I_info_len; i++)
+		{
+			PI_out_golay_dec[i] = (I_max_index>>i) & 1;
+		}
+		return 0;
+	}
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_ch_eq;
+Function Description:
+	对经过频偏校正后的基带信号进行信道估计，实现信道均衡;
+Inputs:
+	PD_in_ch_eq_real_part[]		：	输入，均衡前的信号实部，[0]为最高位；
+	PD_in_ch_eq_imag_part[]		：	输入，均衡前的信号虚部，[0]为最高位；
+	I_info_len					：	输入，信号长度
+	D_ch_estim_real_part		：	输入，信道估计值实部
+	D_ch_estim_imag_part		：	输入，信道估计值虚部
+	PD_out_ch_eq_real_part[]	：	输出，均衡后的信号实部，[0]为最高位；
+	PD_out_ch_eq_imag_part[]	：	输出，均衡后的信号虚部，[0]为最高位；
+Outputs:
+	返回0:正常;
+	返回1:信息序列长度错误;
+	返回2：信道估计值不合法
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_ch_eq(double *PD_in_ch_eq_real_part, double *PD_in_ch_eq_imag_part, int I_info_len, double D_ch_estim_real_part, double D_ch_estim_imag_part, double *PD_out_ch_eq_real_part, double *PD_out_ch_eq_imag_part)
+{
+	int i;
+	double D_ch_estim_square;
+    double D_divide_real_part;
+	double D_divide_imag_part;
+
+	/*计算中间量*/
+	D_ch_estim_square = D_ch_estim_real_part*D_ch_estim_real_part + D_ch_estim_imag_part*D_ch_estim_imag_part;
+	if(D_ch_estim_square<(1e-8) && D_ch_estim_square>-(1e-8))
+	{
+		return 2;
+	}
+	D_divide_real_part = D_ch_estim_real_part / D_ch_estim_square;
+	D_divide_imag_part = D_ch_estim_imag_part / D_ch_estim_square;
+
+
+	/*均衡*/
+	for(i=0; i<I_info_len; i++)
+	{
+		/*复数乘法*/
+		PD_out_ch_eq_real_part[i] = PD_in_ch_eq_real_part[i]*D_divide_real_part - PD_in_ch_eq_imag_part[i]*D_divide_imag_part;
+		PD_out_ch_eq_imag_part[i] = PD_in_ch_eq_real_part[i]*D_divide_imag_part + PD_in_ch_eq_imag_part[i]*D_divide_real_part;
+	}
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_noise_est;
+Function Description:
+	信道噪声估计;
+Inputs:
+	PD_in_noise_est_real_part	：	输入数组指针，信号实部
+	PD_in_noise_est_imag_part	：	输入数组指针，信号虚部
+	I_info_len					：	输入信息序列长度
+	PD_out_noise_est			：	输出噪声功率数据的指针
+Outputs:
+	返回0:正常;
+	返回1：信息长度不合法
+Notes:
+***********************************************************/
+int CSM_noise_est(double *PD_in_noise_est_real_part, double *PD_in_noise_est_imag_part, int I_info_len, double *PD_out_noise_est)
+{
+	int		i;
+	double	D_sig_square = 0;
+	double	D_sig_square_sum = 0;
+
+	if(I_info_len < 1)
+	{
+		return 1;
+	}
+
+	/*各分量平方累加*/
+	for(i=0; i<I_info_len; i++)
+	{
+		D_sig_square = PD_in_noise_est_real_part[i]*PD_in_noise_est_real_part[i] + PD_in_noise_est_imag_part[i]*PD_in_noise_est_imag_part[i];
+		D_sig_square_sum += D_sig_square;
+	}
+
+	/*噪声功率输出*/
+	*PD_out_noise_est = D_sig_square_sum/(I_info_len)-1;
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_average;
+Function Description:
+	信道平均功率;
+Inputs:
+	PD_in_average_real_part	：	输入数组指针，信号实部
+	PD_in_average_imag_part	：	输入数组指针，信号虚部
+	I_info_len				：	输入信息序列长度
+	PD_out_average			：	输出平均功率数据的指针
+Outputs:
+	返回0:正常;
+	返回1：长度不合法；
+Notes:
+***********************************************************/
+int CSM_average(double *PD_in_average_real_part, double *PD_in_average_imag_part, int I_info_len, double *PD_out_average)
+{
+	int		i;
+	double	D_sig_square = 0;
+	double	D_sig_square_sum = 0;
+
+	if(I_info_len < 1)
+	{
+		return 1;
+	}
+
+	/*各分量平方累加*/
+	for(i=0; i<I_info_len; i++)
+	{
+		D_sig_square = PD_in_average_real_part[i]*PD_in_average_real_part[i] + PD_in_average_imag_part[i]*PD_in_average_imag_part[i];
+		D_sig_square_sum += D_sig_square;
+	}
+
+	/*平均功率输出*/
+	*PD_out_average = D_sig_square_sum/(I_info_len);
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_amplifier;
+Function Description:
+	幅度放大;
+Inputs:
+	PD_in_amplifier_real_part		：输入双精度信息序列实部；
+	PD_in_amplifier_imag_part		：输入双精度信息序列虚部；
+	I_info_len						：输入长度；
+	PS_out_amplifier_real_part		：输出short信息序列；
+	D_ampli_mult					：倍数；
+	I_max_bits						：输出限幅值的最多信息比特位数；
+	B_normalize_flag				：归一化标志位，1为归一化
+	B_top_bit_zero_flag				: 最高bit置零标志位，1为置零
+Outputs:
+	返回0：正常
+	返回1：信息长度不合法
+	返回2：输入信号不合法
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int	CSM_amplifier(double *PD_in_amplifier_real_part, double *PD_in_amplifier_imag_part, int I_info_len, short *PS_out_amplifier_real_part, short *PS_out_amplifier_imag_part, double D_ampli_mult, int I_max_bits, int B_normalize_flag, int B_top_bit_zero_flag)
+{
+	int i,result;
+	short int_max_num;
+	short int_min_num;
+	double double_max_num;
+	double double_min_num;
+	short int_max_num_top_bit_zero;
+	short int_min_num_top_bit_zero;
+	double D_mult_result_real_part;
+	double D_mult_result_imag_part;
+	double D_out_average;
+	double D_average_sqrt;
+
+	/*检查位数*/
+	if(I_max_bits > 16)
+	{
+		return 1;
+	}
+
+	/*最大幅值*/
+	int_max_num = (1<<(I_max_bits-1)) - 1;
+	int_min_num = -(1<<(I_max_bits-1));
+	double_max_num = (double)int_max_num;
+	double_min_num = (double)int_min_num;
+	//int_max_num_top_bit_zero = int_max_num & 0x7FFF;
+	//int_min_num_top_bit_zero = int_min_num & 0x7FFF;
+
+
+	/*归一化*/
+	if (B_normalize_flag)
+	{
+		result = CSM_average(PD_in_amplifier_real_part, PD_in_amplifier_imag_part, I_info_len, &D_out_average);
+		
+		if(D_out_average<(1e-8) && D_out_average>-(1e-8))
+		{
+			return 2;
+		}
+		
+		D_average_sqrt = sqrt(D_out_average);
+		for (i=0; i<I_info_len; i++)
+		{
+			D_mult_result_real_part = PD_in_amplifier_real_part[i] / D_average_sqrt * D_ampli_mult;
+			D_mult_result_imag_part = PD_in_amplifier_imag_part[i] / D_average_sqrt * D_ampli_mult;
+
+			/*实部限幅输出*/
+			if(D_mult_result_real_part < double_max_num && D_mult_result_real_part > double_min_num)
+			{
+				PS_out_amplifier_real_part[i] = (short)D_mult_result_real_part;
+			}
+			else if(D_mult_result_real_part < double_min_num)
+			{
+				//PS_out_amplifier_real_part[i] = int_min_num_top_bit_zero;
+				PS_out_amplifier_real_part[i] = int_min_num;
+			}
+			else
+			{
+				//PS_out_amplifier_real_part[i] = int_max_num_top_bit_zero;
+				PS_out_amplifier_real_part[i] = int_min_num;
+			}
+			/*虚部限幅输出*/
+			if(D_mult_result_imag_part < double_max_num && D_mult_result_imag_part > double_min_num)
+			{
+				PS_out_amplifier_imag_part[i] = (short)D_mult_result_imag_part;
+				
+			}
+			else if(D_mult_result_imag_part < double_min_num)
+			{
+				PS_out_amplifier_imag_part[i] = int_min_num_top_bit_zero;
+			}
+			else
+			{
+				PS_out_amplifier_imag_part[i] = int_max_num_top_bit_zero;
+			}
+
+		}
+	}
+	else
+	{
+
+		if (D_ampli_mult<1+(1e-8) && D_ampli_mult>1-(1e-8))
+		{
+			for (i=0; i<I_info_len; i++)
+			{
+				/*实部限幅输出*/
+				if(PD_in_amplifier_real_part[i] < double_max_num && PD_in_amplifier_real_part[i]> double_min_num)
+				{
+					PS_out_amplifier_real_part[i] = (short)PD_in_amplifier_real_part[i];
+				}
+				else if(PD_in_amplifier_real_part[i] < double_min_num)
+				{
+					PS_out_amplifier_real_part[i] = int_min_num_top_bit_zero;
+				}
+				else
+				{
+					PS_out_amplifier_real_part[i] = int_max_num_top_bit_zero;
+				}
+				/*虚部限幅输出*/
+				if(PD_in_amplifier_imag_part[i] < double_max_num && PD_in_amplifier_imag_part[i] > double_min_num)
+				{
+					PS_out_amplifier_imag_part[i] = (short)PD_in_amplifier_imag_part[i];
+				
+				}
+				else if(PD_in_amplifier_imag_part[i] < double_min_num)
+				{
+					PS_out_amplifier_imag_part[i] = int_min_num_top_bit_zero;
+				}
+				else
+				{
+					PS_out_amplifier_imag_part[i] = int_max_num_top_bit_zero;
+				}
+			}
+		}
+		else
+		{
+			for (i=0; i<I_info_len; i++)
+			{
+				D_mult_result_real_part = PD_in_amplifier_real_part[i] * D_ampli_mult;
+				D_mult_result_imag_part = PD_in_amplifier_imag_part[i] * D_ampli_mult;
+
+				/*实部限幅输出*/
+				if(D_mult_result_real_part < double_max_num && D_mult_result_real_part > double_min_num)
+				{
+					PS_out_amplifier_real_part[i] = (short)D_mult_result_real_part;
+				}
+				else if(D_mult_result_real_part < double_min_num)
+				{
+					PS_out_amplifier_real_part[i] = int_min_num_top_bit_zero;
+				}
+				else
+				{
+					PS_out_amplifier_real_part[i] = int_max_num_top_bit_zero;
+				}
+				/*虚部限幅输出*/
+				if(D_mult_result_imag_part < double_max_num && D_mult_result_imag_part > double_min_num)
+				{
+					PS_out_amplifier_imag_part[i] = (short)D_mult_result_imag_part;
+				
+				}
+				else if(D_mult_result_imag_part < double_min_num)
+				{
+					PS_out_amplifier_imag_part[i] = int_min_num_top_bit_zero;
+				}
+				else
+				{
+					PS_out_amplifier_imag_part[i] = int_max_num_top_bit_zero;
+				}
+			}
+		}
+	}
+
+	if (B_top_bit_zero_flag)
+	{		
+		/*置零*/
+		for (i=0; i<I_info_len; i++)
+		{
+			PS_out_amplifier_real_part[i] &= 0x7FFF;
+			PS_out_amplifier_imag_part[i] &= 0x7FFF;
+		}
+	}
+
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_interp;
+Function Description:
+	整数倍内插函数;
+Inputs:
+	PD_in_interp		：输入双精浮点数组指针
+	I_in_info_len		：输入整形数组长度，不得大于480
+	PD_out_interp		：输出双精度数组指针(无论B_truncate的值，数组长度至少满足不截短输出所需长度)
+	I_interp_multiple	：输入整形内插倍数，不得大于120
+	B_truncate			：输入逻辑值，截短标志，1：截短; 0:不截短
+	PI_out_info_len		：输出整形，内插后数组长度
+Outputs:
+	返回0：正常
+	返回1：内插倍数不合法
+	返回2：滤波器参数不对称
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_interp(	double *PD_in_interp,  int I_in_info_len, double *PD_out_interp, int I_interp_multiple, int	B_truncate, int	*PI_out_info_len)
+{
+	int result;
+	int i,ii;
+	int I_info_len_interp_once = I_in_info_len;
+	int I_info_len_truncate = I_in_info_len;
+	int I_temp_interp_multiple = I_interp_multiple;
+	double D_temp_truncate_out_interp;
+	double Pi_interp_temp[64000];
+	double 	PD_filter_coef_2[17] = {0.00204300912936800,0.00957237675461701,-0.0254536740587617,0.0256149940673117,0.0571193060176813,-0.135164116560160,-0.0846902659193229,0.607773618059335,1.09563384065731,0.607773618059335,-0.0846902659193229,-0.135164116560160,0.0571193060176813,0.0256149940673117,-0.0254536740587617,0.00957237675461701,0.00204300912936824};
+	int		I_filter_coef_len_2 = 17;
+	double	PD_filter_coef_3[13] = {0.0277070109360219,-0.135352241282582,-0.168813899107003,-0.00695491042241261,0.398454680086746,0.851252640844439,1.05030441616830,0.851252640844439,0.398454680086746,-0.00695491042241261,-0.168813899107003,-0.135352241282582,0.0277070109360219};
+	int		I_filter_coef_len_3 = 13;
+	double	PD_filter_coef_5[21] = {-0.0299064078384346,-0.0349549747943270,-0.0338613098307686,-0.00626579616142080,0.0585233818476672,0.163579451822784,0.301067174166490,0.451831226518656,0.589155513793152,0.685479406803072,0.720145893447936,0.685479406803072,0.589155513793152,0.451831226518656,0.301067174166490,0.163579451822784,0.0585233818476672,-0.00626579616142080,-0.0338613098307686,-0.0349549747943270,-0.0299064078384346};
+	int		I_filter_coef_len_5 = 21;
+
+
+	/*初始化中间值*/
+	for( i = 0; i < (I_info_len_truncate+ I_filter_coef_len_2)*I_interp_multiple; i++)
+	{
+		if (i < I_info_len_truncate)
+		{
+			Pi_interp_temp[i] = PD_in_interp[i];
+		}
+		else
+		{
+			Pi_interp_temp[i] = 0.0;
+		}
+	}
+
+	/*检查内插倍数*/
+	if (I_interp_multiple <= 1)
+	{
+		return 1;
+	}
+
+	/*循环内插*/
+	else
+	{
+		while (I_interp_multiple > 1)
+		{
+			if (I_interp_multiple%2 == 0)
+			{
+				I_interp_multiple = I_interp_multiple/2;
+				result = CSM_interp_once(Pi_interp_temp, I_info_len_interp_once, PD_out_interp, PI_out_info_len, PD_filter_coef_2,I_filter_coef_len_2, 2);
+				if(result)
+				{
+					return result;
+				}
+				I_info_len_interp_once = PI_out_info_len[0];
+				for (i=0; i<PI_out_info_len[0]; i++)
+				{
+					Pi_interp_temp[i] = PD_out_interp[i];
+				}
+			}
+			else if (I_interp_multiple%3 == 0)
+			{
+				I_interp_multiple = I_interp_multiple/3;
+				result = CSM_interp_once(Pi_interp_temp, I_info_len_interp_once, PD_out_interp, PI_out_info_len, PD_filter_coef_3, I_filter_coef_len_3, 3);
+				if(result)
+				{
+					return result;
+				}
+				I_info_len_interp_once=PI_out_info_len[0];
+				for(i=0; i<PI_out_info_len[0]; i++)
+				{
+					Pi_interp_temp[i] = PD_out_interp[i];
+				}
+			}
+			else if (I_interp_multiple%5 == 0)
+			{
+				I_interp_multiple = I_interp_multiple / 5;
+				result = CSM_interp_once(Pi_interp_temp, I_info_len_interp_once, PD_out_interp, PI_out_info_len, PD_filter_coef_5,I_filter_coef_len_5, 5);
+				if(result)
+				{
+					return result;
+				}
+				I_info_len_interp_once = PI_out_info_len[0];
+				for(i=0; i<PI_out_info_len[0]; i++)
+				{
+					Pi_interp_temp[i] = PD_out_interp[i];
+				}
+			}
+			else
+			{
+				return 1;
+			}
+		}
+	}
+
+	/*截断*/
+	if (result == 0)
+	{
+		if (B_truncate == 1)
+		{
+			ii=(PI_out_info_len[0]-I_info_len_truncate*I_temp_interp_multiple)/2;
+
+			memcpy(PD_out_interp,PD_out_interp+ii,I_info_len_truncate*I_temp_interp_multiple*sizeof(double));
+
+			PI_out_info_len[0] = I_info_len_truncate * I_temp_interp_multiple;
+		}
+		else
+		{}
+	}
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_tx_match_filter;
+Function Description:
+	发送匹配滤波器;
+Inputs:
+	PD_in_match_filter				：输入双精浮点数组指针
+	I_in_info_len					：输入整形数组长度，不得大于480
+	PD_out_match_filter				：输出双精度数组指针
+	C_parameter->PD_filter_coef		：输入2倍内插时双精度滤波器参数
+	C_parameter->I_filter_coef_len	：输入整形2倍内插时滤波器长度
+	C_parameter->D_power_factor		：功率因数
+Outputs:
+	返回0：正常
+	返回1：内插倍数不合法
+	返回2：滤波器参数不对称
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_tx_match_filter(double *PD_in_match_filter, int I_in_info_len, double *PD_out_match_filter, Tx_Match_Filter_Para *C_tx_match_filter_parameter)
+{
+	int result;
+	int i;
+	int I_temp_out_len[1];
+
+
+	/*调用单次内插函数*/
+	result = CSM_interp_once (PD_in_match_filter, I_in_info_len, PD_out_match_filter, I_temp_out_len, C_tx_match_filter_parameter->PD_filter_coef, C_tx_match_filter_parameter->I_filter_coef_len, 2);
+
+	if(result)
+	{
+		return result;
+	}
+
+	/*功率调制*/
+	for (i=0; i<I_temp_out_len[0]; i++)
+	{
+		PD_out_match_filter[i] = C_tx_match_filter_parameter->D_power_factor * PD_out_match_filter[i];
+	}
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_rx_match_filter;
+Function Description:
+	接受匹配滤波器;
+Inputs:
+	PD_in_info				：输入双精度数组指针
+	I_info_len				：输入信息长度
+	PD_out_rx_match_filter	：输出双精度数组指针，长度亦为I_info_len
+	PD_filter_conf			：输入双精度滤波器系数数组指针
+	I_conf_len				：滤波器系数长度
+Outputs:
+	返回0：正常
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_rx_match_filter(double *PD_in_info, int I_info_len, double *PD_out_rx_match_filter, double *PD_filter_conf, int I_conf_len)
+{
+	int i,j;
+	int I_conf_len_minus = I_conf_len -1;
+	int I_half_conf_len = I_conf_len_minus/2;
+	double D_conv_add_up;
+	
+	for (i=-I_half_conf_len; i<I_info_len-I_half_conf_len; i++)
+	{
+		D_conv_add_up = 0;
+
+		for (j=0; j<I_conf_len; j++)
+		{
+			if ((i+j)<0 || (i+j)>I_info_len-1)
+			{
+				continue;
+			}
+			D_conv_add_up += (PD_in_info[i+j] * PD_filter_conf[j]);
+		}
+		PD_out_rx_match_filter[i+I_half_conf_len] = D_conv_add_up;
+	}
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_decim;
+Function Description:
+	整数倍抽取函数;
+Inputs:
+	PD_in_decim		：输入双精浮点数组指针
+	I_in_decim_len	：输入整形数组长度，不得大于115200
+	PD_out_decim	：输出双精度数组指针
+	PI_out_decim_len：输出整形数指针，抽取后输出数组长度
+	I_decim_multiple：输入整形抽取倍数
+Outputs:
+	返回0：正常
+	返回1：抽取倍数不合法
+	返回9：输入长度不合法
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+
+int	CSM_decim(double *PD_in_decim, int I_in_decim_len, double *PD_out_decim, int I_decim_multiple, int *PI_out_decim_len)
+{
+
+	int	i,j;
+	double PD_zo1[8] = {0};
+	double PD_zo2[8] = {0};
+	double PD_zo3[8] = {0};
+	double PD_zo4[8] = {0};
+	double PD_zo5[8] = {0};
+	double PD_zi1[8] = {0};
+	double PD_zi2[8] = {0};
+	double PD_yc1[24] = {0};
+	double PD_yc3[24] = {0};
+	double PD_yc4[24] = {0};
+	double PD_yc2[120000] = {0};
+	double PD_yc5[115200] = {0};
+	double PD_xc[115200] = {0};
+	double PD_b[9] =  {0};
+	double PD_a[9] =  {0};
+	double PD_zi[8] = {0};
+	double temp;
+	int	I_nfact = 0;
+	int	I_order = 0;
+
+
+	if (I_in_decim_len < 30 || I_in_decim_len>115200)
+	{
+		return 9;
+	}
+
+	if(I_decim_multiple == 15)
+	{
+		PD_b[0] = 0.000000003591400010716;
+		PD_b[1] = 0.000000025139800075014;
+		PD_b[2] = 0.000000075419400225041;
+		PD_b[3] = 0.000000125699000375068;
+		PD_b[4] = 0.000000125699000375068;
+		PD_b[5] = 0.000000075419400225041;
+		PD_b[6] = 0.000000025139800075014;
+		PD_b[7] = 0.000000003591400010716;
+
+		PD_a[0] = 1;
+		PD_a[1] = -6.628697760153317;
+		PD_a[2] = 18.884816894564459;
+		PD_a[3] = -29.973043254931028;
+		PD_a[4] = 28.620820578106866;
+		PD_a[5] = -16.441639862025330;
+		PD_a[6] = 5.261109058577601;
+		PD_a[7] = -0.723365194440055;
+
+		PD_zi[0] = 1.000000013641984;
+		PD_zi[1] = -5.628697885886024;
+		PD_zi[2] = 13.256119258708328;
+		PD_zi[3] = -16.716924638458654;
+		PD_zi[4] = 11.903896307182793;
+		PD_zi[5] = -4.537743913607026;
+		PD_zi[6] = 0.723365210497485;
+		I_nfact = 21;
+		I_order = 7;
+	}
+		else if(I_decim_multiple == 10)
+	{
+		PD_b[0]=0.000000003586324209824;
+		PD_b[1]=0.000000028690593678594;
+		PD_b[2]=0.000000100417077875080;
+		PD_b[3]=0.000000200834155750159;
+		PD_b[4]=0.000000251042694687699;
+		PD_b[5]=0.000000200834155750159;
+		PD_b[6]=0.000000100417077875080;
+		PD_b[7]=0.000000028690593678594;
+		PD_b[8]=0.000000003586324209824;
+
+		PD_a[0]=1;
+		PD_a[1]=-7.397720470943622;
+		PD_a[2]=24.072727760966945;
+		PD_a[3]=-44.998914665983186;
+		PD_a[4]=52.843466766922290;
+		PD_a[5]=-39.915914352468299;
+		PD_a[6]=18.937665809760425;
+		PD_a[7]=-5.159179426375651;
+		PD_a[8]=0.617869501520360;
+
+		PD_zi[0]=0.994260040723815;
+		PD_zi[1]=-6.360997871201210;
+		PD_zi[2]=17.573553398666636;
+		PD_zi[3]=-27.167069691876147;
+		PD_zi[4]=25.373077666262702;
+		PD_zi[5]=-14.313721307336323;
+		PD_zi[6]=4.515243039389617;
+		PD_zi[7]=-0.614322954373192;
+
+		I_nfact = 24;
+		I_order = 8;
+	}
+
+	else if(I_decim_multiple == 5)
+	{
+		PD_b[0] = 0.0000007452795136878;
+		PD_b[1] = 0.0000059622361095025;
+		PD_b[2] = 0.0000208678263832587;
+		PD_b[3] = 0.0000417356527665174;
+		PD_b[4] = 0.0000521695659581467;
+		PD_b[5] = 0.0000417356527665174;
+		PD_b[6] = 0.0000208678263832587;
+		PD_b[7] = 0.0000059622361095025;
+		PD_b[8] = 0.0000007452795136878;
+
+		PD_a[0] = 1;
+		PD_a[1] = -6.577646008494097;
+		PD_a[2] = 19.390531070800176;
+		PD_a[3] = -33.402319261839565;
+		PD_a[4] = 36.727988359849121;
+		PD_a[5] = -26.372286620099072;
+		PD_a[6] = 12.068094264841958;
+		PD_a[7] = -3.216287226855169;
+		PD_a[8] = 0.382117314803826;
+
+		PD_zi[0] = 0.994259328688710;
+		PD_zi[1] = -5.545637440489537;
+		PD_zi[2] = 13.733572548421007;
+		PD_zi[3] = -19.477061607218598;
+		PD_zi[4] = 17.040058646583098;
+		PD_zi[5] = -9.180894734680575;
+		PD_zi[6] = 2.817908693910306;
+		PD_zi[7] = -0.379923244401877;
+
+		I_nfact = 24;
+		I_order = 8;
+	}
+	else if(I_decim_multiple == 3)
+	{
+		PD_b[0] = 0.000034799547399;
+		PD_b[1] = 0.000278396379192;
+		PD_b[2] = 0.000974387327174;
+		PD_b[3] = 0.001948774654347;
+		PD_b[4] = 0.002435968317934;
+		PD_b[5] = 0.001948774654347;
+		PD_b[6] = 0.000974387327174;
+		PD_b[7] = 0.000278396379192;
+		PD_b[8] = 0.000034799547399;
+
+		PD_a[0] = 1;
+		PD_a[1] = -5.206943536403724;
+		PD_a[2] = 12.894188977645420;
+		PD_a[3] = -19.532290116785752;
+		PD_a[4] = 19.644084475163854;
+		PD_a[5] = -13.370492078692102;
+		PD_a[6] = 5.999217555250421;
+		PD_a[7] = -1.620726880040626;
+		PD_a[8] = 0.201921718391441;
+
+		PD_zi[0] = 0.994225274405240;
+		PD_zi[1] = -4.183109187545938;
+		PD_zi[2] = 8.636093711599933;
+		PD_zi[3] = -10.786031279034225;
+		PD_zi[4] = 8.742861635656151;
+		PD_zi[5] = -4.552833581941785;
+		PD_zi[6] = 1.410974520872297;
+		PD_zi[7] = -0.200727903113119;
+
+		I_nfact = 24;
+		I_order = 8;
+	}
+		else if(I_decim_multiple == 2)
+	{
+		PD_b[0]=0.000698737077284;
+		PD_b[1]=0.005589896618273;
+		PD_b[2]=0.019564638163956;
+		PD_b[3]=0.039129276327912;
+		PD_b[4]=0.048911595409890;
+		PD_b[5]=0.039129276327912;
+		PD_b[6]=0.019564638163956;
+		PD_b[7]=0.005589896618273;
+		PD_b[8]=0.000698737077284;
+
+		PD_a[0]=1;
+		PD_a[1]=-3.159100504614811;
+		PD_a[2]=5.967108107202719;
+		PD_a[3]=-7.519348642687481;
+		PD_a[4]=6.827184931315498;
+		PD_a[5]=-4.482072321959045;
+		PD_a[6]=2.070876731225467;
+		PD_a[7]=-0.616327535843470;
+		PD_a[8]=0.091588593557079;
+
+		PD_zi[0]=0.993561336875674;
+		PD_zi[1]=-2.152996061085749;
+		PD_zi[2]=3.760296648702967;
+		PD_zi[3]=-3.755020765181475;
+		PD_zi[4]=2.984065034108902;
+		PD_zi[5]=-1.511409800512516;
+		PD_zi[6]=0.528015613259221;
+		PD_zi[7]=-0.090364144726025;
+
+		I_nfact = 24;
+		I_order = 8;
+	}
+
+	else
+	{
+		return 1;
+	}
+
+	for(i=0; i<=I_nfact-1; i++)
+	{
+		*(PD_xc+i) = 2*(*PD_in_decim) - *(PD_in_decim+I_nfact-i);	
+	}
+
+	for(i=0; i<=I_order-1; i++)
+	{
+		*(PD_zi1+i) = (*(PD_zi+i)) * (*(PD_xc));
+	}
+
+	my_filter(PD_b,PD_a,PD_xc,PD_zi1,PD_zo1,PD_yc1,I_order,I_nfact);
+
+	for(i=0; i<=I_nfact-1; i++)
+	{
+		*(PD_xc+i+I_nfact) = 2*(*(PD_in_decim+I_in_decim_len-1)) - (*(PD_in_decim+I_in_decim_len-2-i));		
+	}
+
+	my_filter(PD_b,PD_a,PD_in_decim,PD_zo1,PD_zo2,PD_yc2,I_order,I_in_decim_len);
+	my_filter(PD_b,PD_a,(PD_xc+I_nfact),PD_zo2,PD_zo3,PD_yc3,I_order,I_nfact);
+
+	/*Reverse the sequence*/
+	for(i=0; i<=I_nfact/2-1; i++)
+	{
+		temp = *(PD_yc3+i);
+		*(PD_yc3+i) = *(PD_yc3+I_nfact-1-i);
+		*(PD_yc3+I_nfact-1-i) = temp;
+	}
+
+	/*Reverse the sequence*/
+	for(i=0; i<=I_in_decim_len/2-1; i++)
+	{
+		temp = *(PD_yc2+i);
+		*(PD_yc2+i) = *(PD_yc2+I_in_decim_len-1-i);
+		*(PD_yc2+I_in_decim_len-1-i) = temp;
+	}
+
+	for(i=0; i<=I_order-1; i++)
+	{
+		*(PD_zi2+i) = *(PD_zi+i) * (*PD_yc3);
+	}
+
+	my_filter(PD_b,PD_a,PD_yc3,PD_zi2,PD_zo4,PD_yc4,I_order,I_nfact);
+	my_filter(PD_b,PD_a,PD_yc2,PD_zo4,PD_zo5,PD_yc5,I_order,I_in_decim_len);
+
+	/*Reverse the sequence*/
+	for(i=0; i<=I_in_decim_len/2-1; i++)
+	{
+		temp = *(PD_yc5+i);
+		*(PD_yc5+i) = *(PD_yc5+I_in_decim_len-1-i);
+		*(PD_yc5+I_in_decim_len-1-i) = temp;
+	}
+	j = 0;
+
+	/*Reverse the sequence*/
+	for(i=I_decim_multiple-1; i<=I_in_decim_len-1; i=i+I_decim_multiple)
+	{
+		*(PD_out_decim+j) = *(PD_yc5+i);
+		j++;
+	}
+	*PI_out_decim_len = j;
+
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_conv_enc;
+Function Description:
+	卷积编码，约束度为9;
+Inputs:
+	PI_in_conv_enc	：输入整形信息序列；
+	I_info_len		：输入信息序列长度；
+	PI_out_conv_enc	：输出整形信息序列；
+	I_out_len		：输出目标匹配长度；
+	I_conv_enc_rate	：码率，输入2、3、4，分别对应1/2、1/3、1/4码率；
+	PI_conv_enc_poly：生成多项式
+Outputs:
+	返回0：正常
+	返回1：输出过短
+	返回2：卷积码输出过短
+	返回3：码率不合法
+	返回4：输入长度过小
+	返回9：内部序列过长
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_conv_enc(int *PI_in_conv_enc, int I_info_len, int *PI_out_rate_matching, int I_out_len, int I_conv_enc_rate, int *PI_conv_enc_poly)
+{
+	int i,j;
+	int I_conv_enc_reg = 0;
+	int I_num_of_one = 0;
+	int I_poly_reg[4] = {0};
+	int PI_out_conv_enc[700];
+	
+	if (I_info_len*I_conv_enc_rate > 700)
+	{
+		return 9;
+	}
+
+	/*判断长度是否过小*/
+	if (I_info_len < CSM_CONV_ENC_CONSTRAINT_LEN)
+	{
+		return 4;
+	}
+
+	/*判断码率是否合法*/
+	if (I_conv_enc_rate<2 || I_conv_enc_rate>4)
+	{
+		return 3;
+	}
+
+	/*咬尾，存入I_conv_enc_reg*/
+	for (i=0; i<CSM_CONV_ENC_CONSTRAINT_LEN-1; i++)
+	{
+		I_conv_enc_reg <<= 1;
+		I_conv_enc_reg ^= PI_in_conv_enc[I_info_len-CSM_CONV_ENC_CONSTRAINT_LEN+1+i];		
+	}
+
+	/*存入I_poly_reg*/
+	for (i=0; i<I_conv_enc_rate; i++)
+	{
+		for (j=0; j<CSM_CONV_ENC_CONSTRAINT_LEN; j++)
+		{
+			I_poly_reg[i] <<= 1;
+			I_poly_reg[i] ^= PI_conv_enc_poly[CSM_CONV_ENC_CONSTRAINT_LEN-1-j+CSM_CONV_ENC_CONSTRAINT_LEN*i];
+		}
+	}
+
+	/*卷积编码*/
+	for (i=0; i<I_info_len; i++)
+	{
+		I_conv_enc_reg <<= 1;
+		I_conv_enc_reg ^= PI_in_conv_enc[i];
+		for (j=0; j<I_conv_enc_rate; j++)
+		{
+			PI_out_conv_enc[i*I_conv_enc_rate+j] = I_poly_reg[j] & I_conv_enc_reg;
+		}
+	}
+	for (i=0; i<I_info_len*I_conv_enc_rate; i++)
+	{
+		I_num_of_one = 0;
+		for (j=0; j<CSM_CONV_ENC_CONSTRAINT_LEN; j++)
+		{
+			I_num_of_one ^= (PI_out_conv_enc[i]>>j)&1;
+		}
+		PI_out_conv_enc[i] = I_num_of_one;
+	}
+
+	/*速率匹配*/
+	return rate_matching(PI_out_conv_enc, 0, PI_out_conv_enc, I_info_len*I_conv_enc_rate, PI_out_rate_matching, I_out_len);
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	conv_dec;
+Function Description:
+	卷积译码;
+Inputs:
+	PD_in_conv_dec	：输入信息序列指针；
+	I_in_code_len	：输入信息长度；
+	PI_out_conv_dec	：输出信息序列指针；
+	I_code_rate		：码率
+Outputs:
+	返回0：正常
+	返回1：码率不合法
+Notes: 本函数调用的函数清单及其他
+********************************************************/
+int conv_dec(double *PD_in_conv_dec, int I_in_code_len,int *PI_out_conv_dec, int I_code_rate, int I_code_type, int I_depth)
+{
+	int I_row = 9;
+	int result;
+	double *PD_g_array;
+	double PD_g_2[2][9] =  {{1,0,1,1,1,0,0,0,1},
+							{1,1,1,1,0,1,0,1,1}};
+	double PD_g_3[3][9] =  {{1,0,1,1,0,1,1,1,1},
+							{1,1,0,1,1,0,0,1,1},
+							{1,1,1,0,0,1,0,0,1}};
+	double PD_g_4[4][9] =  {{1,0,0,1,1,1,0,1,1},
+							{1,0,1,0,0,1,0,1,1},
+							{1,1,0,1,1,1,0,0,1},
+							{1,1,1,1,1,0,1,0,1}};
+
+	if(I_code_rate == 2)
+	{
+		PD_g_array = *PD_g_2;
+	}
+	else if(I_code_rate == 3)
+	{
+		PD_g_array = *PD_g_3;
+	}
+	else if(I_code_rate == 4)
+	{
+		PD_g_array = *PD_g_4;
+	}
+	else
+	{
+		return 1;
+	}
+
+	result = ViterbiDecode( PD_g_array,PD_in_conv_dec,I_in_code_len,I_code_rate,I_row,I_code_type,I_depth,PI_out_conv_dec );
+	
+	return result;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_FCCH;
+Function Description:
+	频率校正突发;
+Inputs:
+	PD_out_FCCH ：输出14400个比特；
+Outputs:
+	返回0：正常
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_FCCH(double *PD_out_FCCH)
+{
+	double D_period = (double)1/FCCH_BASIC_RATE;
+	double D_t = (double)1/FREQUENCY_STANDARD;
+	double D_tmp_cos = 0;
+	double D_tmp_sqr = 0;
+	int I_system_len = 120;
+	int i;
+
+	for (i=0; i<14400; i++)
+	{
+		D_tmp_sqr = CALC_SQR(i*D_t - I_system_len/2*D_period);
+		D_tmp_cos = cos(0.96*DOUBLE_PI*D_tmp_sqr / (120*D_period*D_period));
+		PD_out_FCCH[i] = SQRT_2*D_tmp_cos;
+	}
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_BACH;
+Function Description:
+	基本告警信道;
+Inputs:
+	PI_in_BACH					：输入信息序列指针，9位16进制；
+	PD_out_BACH_6PSK_real_part	：输出1815个符号实部；
+	PD_out_BACH_6PSK_imag_part	：输出1815个符号虚部；
+Outputs:
+	返回0：正常
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_BACH(int *PI_in_BACH, double *PD_out_BACH_6PSK_real_part, double *PD_out_BACH_6PSK_imag_part)
+{
+	int i,j,z;
+	int PI_out_BACH[BACH_OUT_INFO_LEN] = {0};
+	int PI_RS_code[15] = {0};
+	int PI_parity[6] = {0};
+	int PI_g[6] = {6,9,6,4,14,10};
+	int PI_exp_table[15] = {4,2,1,12,6,3,13,10,5,14,7,15,11,9,8};
+	int PI_log_table[15] = {3,2,6,1,9,5,11,15,14,8,13,4,7,10,12};
+	int I_feedback = 0;
+	int I_gf_exp[6] = {0};
+	int PI_spread_spectrum_table[16][18] = {{0,3,0,3,0,3,0,3,0,3,0,3,0,3,0,3,0,3},
+											{0,0,1,1,2,2,0,0,1,1,2,2,0,0,1,1,2,2},
+											{0,3,1,5,2,4,0,3,1,5,2,4,0,3,1,5,2,4},
+											{0,0,2,2,1,1,0,0,2,2,1,1,0,0,2,2,1,1},
+											{0,3,2,4,1,5,0,3,2,4,1,5,0,3,2,4,1,5},
+											{0,0,0,0,0,0,1,1,1,1,1,1,2,2,2,2,2,2},
+											{0,3,0,3,0,3,1,5,1,5,1,5,2,4,2,4,2,4},
+											{0,0,1,1,2,2,1,1,2,2,0,0,2,2,0,0,1,1},
+											{0,3,1,5,2,4,1,5,2,4,0,3,2,4,0,3,1,5},
+											{0,0,2,2,1,1,1,1,0,0,2,2,2,2,1,1,0,0},
+											{0,3,2,4,1,5,1,5,0,3,2,4,2,4,1,5,0,3},
+											{0,0,0,0,0,0,2,2,2,2,2,2,1,1,1,1,1,1},
+											{0,3,0,3,0,3,2,4,2,4,2,4,1,5,1,5,1,5},
+											{0,0,1,1,2,2,2,2,0,0,1,1,1,1,2,2,0,0},
+											{0,3,1,5,2,4,2,4,0,3,1,5,1,5,2,4,0,3},
+											{0,0,2,2,1,1,2,2,1,1,0,0,1,1,0,0,2,2}};
+	
+
+	/*计算RS编码校验位*/
+	for(i=0; i<BACH_IN_INFO_LEN; i++)
+	{
+		I_feedback = PI_in_BACH[i] ^ PI_parity[5];
+		
+
+		for(j=5; j>0; j--)
+		{
+			PI_parity[j] = PI_parity[j-1];
+		}
+		PI_parity[0] = 0;
+		
+		for(j=0; j<6; j++)
+		{
+			if (I_feedback == 0)
+			{
+				I_gf_exp[j] = 0;
+			}
+			else
+			{
+				I_gf_exp[j] = PI_exp_table[(PI_g[j]+PI_log_table[I_feedback-1]-1)%15];
+			}
+			PI_parity[j] = PI_parity[j] ^ I_gf_exp[j];
+		}
+
+	}
+
+	/*RS编码输出赋值*/
+	memcpy(PI_RS_code,PI_in_BACH,BACH_IN_INFO_LEN*sizeof(int));
+	for(i=0; i<6; i++)
+	{
+		PI_RS_code[BACH_IN_INFO_LEN+i] = PI_parity[5-i];
+	}
+
+	/*扩频输出*/
+	for(i=0; i<15; i++)
+	{
+		for(j=0; j<2; j++)
+		{
+			PI_out_BACH[121*i + j] = 0;
+		}
+		for(j=0; j<18; j++)
+		{
+			for(z=0; z<6; z++)
+			{
+				PI_out_BACH[121*i+2+j*6+z] = PI_spread_spectrum_table[PI_RS_code[i]][j];
+			}
+		}
+		for(j=0; j<11; j++)
+		{
+			PI_out_BACH[121*i+110+j] = 0; 
+		}
+	}
+	
+	CSM_6PSK(PI_out_BACH,PD_out_BACH_6PSK_real_part,PD_out_BACH_6PSK_imag_part,BACH_OUT_INFO_LEN);
+
+	return 0;
+}
+
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_sync_time;
+Function Description:
+	对高倍采样信号进行时间同步;
+Inputs:
+	PD_in_sync_time_real_part[]								：	输入，信号实部
+    PD_in_sync_time_imag_part[]								：	输入，信号虚部
+ 	I_in_len												：	输入，信号长度
+ 	PSTR_CSM_sync_time_parameter->PCH_mod_type				：	输入，调制参数
+    PSTR_CSM_sync_time_parameter->PCH_NT_mod_type_all[9][8]	：	输入，9*8char型全部调制类型参数
+ 	PSTR_CSM_sync_time_parameter->I_Rx_ov					：	输入，采样倍数
+    PSTR_CSM_sync_time_parameter->PI_NT_Rx_unicode			：	输入，UW
+    PSTR_CSM_sync_time_parameter->I_NT_Rx_unicode_len		：	输入，UW长度
+  	PSTR_CSM_sync_time_parameter->PI_NT_Rx_unicode_pos		：	输入，UW符号位置，不包括保护间隔，从数据开始计数
+  	PSTR_CSM_sync_time_parameter->I_NT_Rx_unicode_pos_len	：	输入，UW符号位置长度
+  	PSTR_CSM_sync_time_parameter->I_NT_PNB_map				：	输入，PNB_map
+  	PSTR_CSM_sync_time_parameter->I_NT_HSN_left				：	输入，左保护间隔 半符号数
+  	PSTR_CSM_sync_time_parameter->I_NT_PNB_seg_num			：	输入，UW 中CPQPSK分组号
+   	PSTR_CSM_sync_time_parameter->PI_NT_PNB_mod_seg_tail	：	输入，PNB 每段结束位置
+  	PSTR_CSM_sync_time_parameter->PI_NT_kstart				：	输入，CPQPSK调制 每段起始位置
+  	PSTR_CSM_sync_time_parameter->PI_NT_kend				：	输入，CPQPSK调制 每段结束位置
+  	PSTR_CSM_sync_time_parameter->I_NT_PNB_DOWN_info1_len	：	输入，PNB_DOWN_info1_len
+ 	PSTR_CSM_sync_time_parameter->I_NT_protect_bit_process	:   输入，保护符号是否参与调制
+  	PSTR_CSM_sync_time_parameter->I_State_Rx_ideal_pos		：	输入，UW理想位置
+  	PSTR_CSM_sync_time_parameter->I_State_half_wind			：	输入，半窗
+  	PSTR_CSM_sync_time_parameter->I_State_shft_pos			：	输入，修正滑动位置
+	PSTR_CSM_sync_time_parameter->I_State_sample_shft		:	输入，采样偏移
+  	PSTR_CSM_sync_time_parameter->D_delta_f					：	输入，估计频偏值
+	PSTR_CSM_sync_time_parameter->PD_NT_unicode_sym_real_part	：	输入，UW调制后的符号实部数组指针(长度为I_NT_Rx_unicode_pos_len)
+	PSTR_CSM_sync_time_parameter->PD_NT_unicode_sym_imag_part	：	输入，UW调制后的符号虚部数组指针(长度为I_NT_Rx_unicode_pos_len)
+	PSTR_CSM_sync_time_parameter->B_sync_PNB_method			:	PNB相关峰搜索方法
+
+ 
+  	PSTR_CSM_sync_time_parameter->PI_State_shft_half_sym	：	输出，修正后半窗长度
+  	PSTR_CSM_sync_time_parameter->PD_Re_h_h					：	输出，归一化相关峰值_实部
+  	PSTR_CSM_sync_time_parameter->PD_Im_h_h					：	输出，归一化相关峰值_虚部
+  	PSTR_CSM_sync_time_parameter->PD_pe						：	输出，相关峰值(绝对值)
+  	PSTR_CSM_sync_time_parameter->PI_po						：	输出，峰值对应的位置
+  	PSTR_CSM_sync_time_parameter->PI_pe_len					：	输出，相关值长度
+    PSTR_CSM_sync_time_parameter->PI_correct_phase_len		：	输出，单倍采样信号长度每组长度
+  	PSTR_CSM_sync_time_parameter->PI_outss_len				：	输出，单倍采样信号所有组总共长度
+  	PSTR_CSM_sync_time_parameter->PD_Re_correct_phase		：	输出，ov组矫正频偏和相位的单倍采样信号 实部
+  	PSTR_CSM_sync_time_parameter->PD_Im_correct_phase		：	输出，ov组矫正频偏和相位的单倍采样信号 虚部
+Outputs:
+	返回0：正常;
+	返回1：shft错误;
+Notes: 
+**************************************************************************/
+
+int CSM_sync_time(int I_in_len,	double PD_in_sync_time_real_part[],	double PD_in_sync_time_imag_part[], Sync_Time_Para *PSTR_CSM_sync_time_parameter)
+{
+
+	int I_tmp_index;
+	int I_symbol_QPSK;
+	int i;
+	int m;
+	int mm;
+	int temp;
+	int jj;
+	int j;
+	int start_point;
+	int sum_len;
+	int shft_half_sym;
+	int shft;
+	int shft_pp;
+	int half_wind;
+	int sig_len;
+	int search_pos;
+	int max_pos,kk_len;
+	int kk[2000] = {0};
+	float in_len_s;
+	float NT_HSN_left_s;
+	double Re_mods[200];
+	double Im_mods[200];
+	double max_out, temp1;
+	double Re_temp_sum,Im_temp_sum;
+	double Re_temp_sig[7000];
+	double Im_temp_sig[7000];
+	double peak_cor[7000];
+	double Re_sig_cor[7000];
+	double Im_sig_cor[7000];
+	double Re_correct_phase_sig[2000];
+	double Im_correct_phase_sig[2000];
+
+	double PD_cos_table[8] = {1,0.707106781186548,0,-0.707106781186548,-1,-0.707106781186548,0,0.707106781186547};
+	double PD_sin_table[8] = {0,0.707106781186548,1,0.707106781186548,0,-0.707106781186548,-1,-0.707106781186548};
+
+	double PD_6PSK_symbol_real_part[4] = {1.0,0.0,0.0,-1.0};
+	double PD_6PSK_symbol_imag_part[4] = {0.0,1.0,-1.0,0.0};
+	
+	/*初始参数*/
+	half_wind = PSTR_CSM_sync_time_parameter->I_State_half_wind;
+	shft_pp = PSTR_CSM_sync_time_parameter->I_NT_HSN_left - half_wind*2 + PSTR_CSM_sync_time_parameter->I_State_shft_pos*2;
+	shft = shft_pp*PSTR_CSM_sync_time_parameter->I_Rx_ov/2 + PSTR_CSM_sync_time_parameter->I_State_sample_shft;
+	shft_half_sym = shft_pp;
+	PSTR_CSM_sync_time_parameter->PI_State_shft_half_sym[0] = shft_half_sym;
+	in_len_s = I_in_len-shft;
+	NT_HSN_left_s = PSTR_CSM_sync_time_parameter->I_NT_HSN_left;
+	PSTR_CSM_sync_time_parameter->PI_outss_len[0] = I_in_len-shft;
+
+	/*调制*/
+	if(!strcmp(PSTR_CSM_sync_time_parameter->PCH_mod_type,"CBPSK"))
+	{
+		for(i=0; i<PSTR_CSM_sync_time_parameter->I_NT_Rx_unicode_len; i++)
+		{
+			Re_mods[i] = 1 - 2*(PSTR_CSM_sync_time_parameter->PI_NT_Rx_unicode[i]);
+			Im_mods[i] = 0;
+		}
+	}
+	else
+	{
+		for(i=0,j=0; i<PSTR_CSM_sync_time_parameter->I_NT_Rx_unicode_len; i+=2,j++)
+		{
+			I_symbol_QPSK = (PSTR_CSM_sync_time_parameter->PI_NT_Rx_unicode[i]<<1) + PSTR_CSM_sync_time_parameter->PI_NT_Rx_unicode[i+1];
+			Re_mods[j] = PD_6PSK_symbol_real_part[I_symbol_QPSK];
+			Im_mods[j] = PD_6PSK_symbol_imag_part[I_symbol_QPSK];
+		}
+	}
+
+	/*接收符号与UW 共轭相乘*/
+	sum_len = 0;
+	for (i=0; i<PSTR_CSM_sync_time_parameter->I_Rx_ov; i++)
+	{
+		/*分段*/
+		if (i == 0)
+		{
+			sig_len = ceil (in_len_s / (PSTR_CSM_sync_time_parameter->I_Rx_ov) );
+			sum_len = 0;
+		}
+		else
+		{
+			sum_len = sum_len+sig_len;
+			sig_len = ceil(in_len_s / (PSTR_CSM_sync_time_parameter->I_Rx_ov-i));		
+		}
+
+		in_len_s = in_len_s-sig_len;
+		PSTR_CSM_sync_time_parameter->PI_correct_phase_len[i] = sig_len;
+
+		if (shft < 0)
+		{
+			return 1;
+		}
+
+		/*抽取*/	    	
+		for (j=0; j< sig_len; j++)
+		{
+			temp = shft + i + j * PSTR_CSM_sync_time_parameter->I_Rx_ov ;
+			Re_temp_sig[j] = PD_in_sync_time_real_part[temp];
+			Im_temp_sig[j] = PD_in_sync_time_imag_part[temp];
+		}
+		max_out = 0;
+		max_pos = 0;
+		if  (PSTR_CSM_sync_time_parameter->I_NT_PNB_map == 0)
+		{
+			/*是否 CPQPSK*/
+			if (!strcmp(PSTR_CSM_sync_time_parameter->PCH_mod_type,"CPQPSK"))
+			{
+
+				/*校正频偏和相位*/
+				for (j=0; j< sig_len; j++)
+				{
+					mm = PSTR_CSM_sync_time_parameter->I_State_shft_pos -half_wind + j +1;
+					temp1 = (mm+((double)(i+PSTR_CSM_sync_time_parameter->I_State_sample_shft))/(PSTR_CSM_sync_time_parameter->I_Rx_ov))*(DOUBLE_PI/4 + PSTR_CSM_sync_time_parameter->D_delta_f);
+					PSTR_CSM_sync_time_parameter->PD_Re_correct_phase[sum_len+ j ] = Re_cpl_mul(Re_temp_sig[j],Im_temp_sig[j], cos(temp1),-sin(temp1));
+					PSTR_CSM_sync_time_parameter->PD_Im_correct_phase [sum_len+ j ] = Im_cpl_mul(Re_temp_sig[j],Im_temp_sig[j], cos(temp1),-sin(temp1));
+				}
+			}
+			else if(!strcmp(PSTR_CSM_sync_time_parameter->PCH_mod_type,"CBPSK"))
+			{
+				/*校正频偏和相位*/
+				for (j=0; j<sig_len; j++)
+				{
+					mm = PSTR_CSM_sync_time_parameter->I_State_shft_pos -half_wind + j +1;
+					temp1 = (mm+((double)(i+PSTR_CSM_sync_time_parameter->I_State_sample_shft))/(PSTR_CSM_sync_time_parameter->I_Rx_ov))*(DOUBLE_PI/2 + PSTR_CSM_sync_time_parameter->D_delta_f);
+					PSTR_CSM_sync_time_parameter->PD_Re_correct_phase[sum_len+ j ] = Re_cpl_mul(Re_temp_sig[j],Im_temp_sig[j], cos(temp1),-sin(temp1));
+					PSTR_CSM_sync_time_parameter->PD_Im_correct_phase [sum_len+ j ] = Im_cpl_mul(Re_temp_sig[j],Im_temp_sig[j], cos(temp1),-sin(temp1));
+
+				}
+
+			}
+			else
+			{
+				/*只校正频偏*/
+				for (j=0; j<sig_len; j++)
+				{
+					mm = PSTR_CSM_sync_time_parameter->I_State_shft_pos -half_wind + j +1;
+					temp1 = (mm+((double)(i+PSTR_CSM_sync_time_parameter->I_State_sample_shft))/(PSTR_CSM_sync_time_parameter->I_Rx_ov))*(PSTR_CSM_sync_time_parameter->D_delta_f);
+					PSTR_CSM_sync_time_parameter->PD_Re_correct_phase [sum_len+ j ] = Re_cpl_mul(Re_temp_sig[j],Im_temp_sig[j], cos(temp1),-sin(temp1));
+					PSTR_CSM_sync_time_parameter->PD_Im_correct_phase [sum_len+ j ] = Im_cpl_mul(Re_temp_sig[j],Im_temp_sig[j], cos(temp1),-sin(temp1));
+				}
+			}
+
+			/*本地UW符号与接收UW符号共轭相关 搜索峰值*/
+			max_out = 0.;
+			max_pos = 0;
+
+			/*搜索*/
+			for (m=0; m<2*half_wind+1; m++)
+			{
+				search_pos = PSTR_CSM_sync_time_parameter->I_State_Rx_ideal_pos-half_wind + m;
+				Re_temp_sum = 0.;
+				Im_temp_sum = 0.;
+
+				/*本地UW符号与接收UW符号共轭相关*/
+				for (mm=0; mm<PSTR_CSM_sync_time_parameter->I_NT_Rx_unicode_pos_len;mm++)
+				{
+					temp = search_pos-1 + PSTR_CSM_sync_time_parameter->PI_NT_Rx_unicode_pos[mm] + floor((NT_HSN_left_s-shft_half_sym)/2);
+					Re_temp_sum = Re_temp_sum+ Re_cpl_mul(Re_mods[mm],Im_mods[mm], PSTR_CSM_sync_time_parameter->PD_Re_correct_phase[sum_len+temp], -PSTR_CSM_sync_time_parameter->PD_Im_correct_phase[sum_len+temp]);
+					Im_temp_sum = Im_temp_sum+ Im_cpl_mul(Re_mods[mm],Im_mods[mm], PSTR_CSM_sync_time_parameter->PD_Re_correct_phase[sum_len+temp], -PSTR_CSM_sync_time_parameter->PD_Im_correct_phase[sum_len+temp]);
+				}
+				Re_sig_cor[m] = Re_temp_sum/PSTR_CSM_sync_time_parameter->I_NT_Rx_unicode_pos_len;
+				Im_sig_cor[m] = Im_temp_sum/PSTR_CSM_sync_time_parameter->I_NT_Rx_unicode_pos_len;
+				peak_cor[m] = my_ABS(Re_sig_cor[m] ,Im_sig_cor[m]);
+
+				/*找到最大值*/
+				if (peak_cor[m]> max_out)
+				{
+					/*最大值*/
+					max_out = peak_cor[m];
+					/*最大值 对应下标*/
+					max_pos = m;
+				}
+				else
+				{}
+			}
+
+			/*输出最大值*/
+			PSTR_CSM_sync_time_parameter->PD_pe[i] = max_out;
+
+			/*输出最大值 对应下标*/
+			PSTR_CSM_sync_time_parameter->PI_po[i] = max_pos+1;
+			PSTR_CSM_sync_time_parameter->PD_Re_h_h[i] = Re_sig_cor[max_pos];
+			PSTR_CSM_sync_time_parameter->PD_Im_h_h[i] = Im_sig_cor[max_pos];
+		}
+		else
+		{
+			
+
+			/*只校正频偏*/
+			for (j=0; j<sig_len; j++)
+			{
+				mm = -half_wind +  PSTR_CSM_sync_time_parameter->I_State_shft_pos + j;
+				temp1 = (mm+1+(double)i/(PSTR_CSM_sync_time_parameter->I_Rx_ov) + PSTR_CSM_sync_time_parameter->I_State_sample_shft)*(PSTR_CSM_sync_time_parameter->D_delta_f);	
+				PSTR_CSM_sync_time_parameter->PD_Re_correct_phase[sum_len+ j ] = Re_cpl_mul(Re_temp_sig[j],Im_temp_sig[j], cos(temp1),-sin(temp1));
+				PSTR_CSM_sync_time_parameter->PD_Im_correct_phase [sum_len+ j ] = Im_cpl_mul(Re_temp_sig[j],Im_temp_sig[j], cos(temp1),-sin(temp1));		
+			}
+
+			/*kk 初始化*/
+			kk_len = PSTR_CSM_sync_time_parameter->PI_NT_PNB_mod_seg_tail[PSTR_CSM_sync_time_parameter->I_NT_PNB_seg_num-1];
+			for (j=0; j<kk_len; j++)
+			{
+				kk[j] = 0;
+			}
+
+			if (PSTR_CSM_sync_time_parameter->B_sync_PNB_method == 0)
+			{
+				if (PSTR_CSM_sync_time_parameter->I_NT_protect_bit_process == 0)
+				{
+					/*kk赋值*/
+					for (m=0; m<PSTR_CSM_sync_time_parameter->I_NT_PNB_seg_num; m++)
+					{
+						if (!strcmp(PSTR_CSM_sync_time_parameter->PCH_NT_mod_type_all[m],"CPQPSK"))
+						{
+							for(j=0; j<PSTR_CSM_sync_time_parameter->PI_NT_kend[m]-PSTR_CSM_sync_time_parameter->PI_NT_kstart[m]; j++)
+							{
+								temp = j + PSTR_CSM_sync_time_parameter->PI_NT_kstart[m] - ceil(NT_HSN_left_s/2);
+								kk[temp] = PSTR_CSM_sync_time_parameter->PI_NT_kstart[m]+j;
+							}
+										
+						}
+						else
+						{}
+					}
+
+					/*本地UW符号与接收UW符号共轭相关 搜索峰值*/
+					max_out = 0.;
+					max_pos = 0;
+
+					/*搜索位置*/
+					for (m=0; m<2*half_wind+1; m++) 
+					{
+						search_pos = PSTR_CSM_sync_time_parameter->I_State_Rx_ideal_pos-half_wind + m;
+						start_point = m + PSTR_CSM_sync_time_parameter->PI_NT_Rx_unicode_pos[0];
+						kk_len = PSTR_CSM_sync_time_parameter->PI_NT_PNB_mod_seg_tail[PSTR_CSM_sync_time_parameter->I_NT_PNB_seg_num-1];
+
+						/*校正相位*/
+						for (jj=0; jj<kk_len; jj++ )
+						{
+							temp = start_point+jj;
+							I_tmp_index = kk[jj] & 7;
+							Re_correct_phase_sig[jj] = Re_cpl_mul(PSTR_CSM_sync_time_parameter->PD_Re_correct_phase[sum_len+temp],PSTR_CSM_sync_time_parameter->PD_Im_correct_phase[sum_len+temp], PD_cos_table[I_tmp_index],-PD_sin_table[I_tmp_index]);
+							Im_correct_phase_sig[jj] = Im_cpl_mul(PSTR_CSM_sync_time_parameter->PD_Re_correct_phase[sum_len+temp],PSTR_CSM_sync_time_parameter->PD_Im_correct_phase[sum_len+temp], PD_cos_table[I_tmp_index],-PD_sin_table[I_tmp_index]);
+						}
+
+						Re_temp_sum = 0.;
+						Im_temp_sum = 0.;
+
+						/*本地UW符号与接收UW符号共轭相关*/
+						for (mm=0; mm< PSTR_CSM_sync_time_parameter->I_NT_Rx_unicode_pos_len; mm++)
+						{
+							temp = PSTR_CSM_sync_time_parameter->PI_NT_Rx_unicode_pos[mm]+ PSTR_CSM_sync_time_parameter->I_NT_PNB_DOWN_info1_len;
+							Re_temp_sum = Re_temp_sum + Re_cpl_mul(Re_mods[mm],Im_mods[mm], Re_correct_phase_sig[temp], -Im_correct_phase_sig[temp]);
+							Im_temp_sum = Im_temp_sum + Im_cpl_mul(Re_mods[mm],Im_mods[mm], Re_correct_phase_sig[temp], -Im_correct_phase_sig[temp]);
+						}
+						Re_sig_cor[m] = Re_temp_sum/PSTR_CSM_sync_time_parameter->I_NT_Rx_unicode_pos_len;
+						Im_sig_cor[m] = Im_temp_sum/PSTR_CSM_sync_time_parameter->I_NT_Rx_unicode_pos_len;
+						peak_cor[m] = my_ABS(Re_sig_cor[m] ,Im_sig_cor[m]);
+
+						/*找到最大值*/
+						if (peak_cor[m]> max_out)
+						{
+							/*最大值*/
+							max_out = peak_cor[m];
+							/*最大值 对应下标*/
+							max_pos = m;
+						}
+						else
+						{} 
+					}
+
+					/*输出最大值*/
+					PSTR_CSM_sync_time_parameter->PD_pe[i] = max_out;
+					/*输出最大值 对应下标*/
+					PSTR_CSM_sync_time_parameter->PI_po[i] = max_pos;
+					PSTR_CSM_sync_time_parameter->PD_Re_h_h[i] = Re_sig_cor[max_pos];
+					PSTR_CSM_sync_time_parameter->PD_Im_h_h[i] = Im_sig_cor[max_pos];
+				}
+				else
+				{
+				
+					/*kk赋值*/
+					for (m=1; m<PSTR_CSM_sync_time_parameter->I_NT_PNB_seg_num-1; m++)
+					{
+						if (!strcmp(PSTR_CSM_sync_time_parameter->PCH_NT_mod_type_all[m],"CPQPSK"))
+						{
+							for(j=0; j<PSTR_CSM_sync_time_parameter->PI_NT_kend[m]-PSTR_CSM_sync_time_parameter->PI_NT_kstart[m]+1; j++)
+							{
+									temp = j + PSTR_CSM_sync_time_parameter->PI_NT_kstart[m]- ceil(NT_HSN_left_s/2);
+									kk[temp] = PSTR_CSM_sync_time_parameter->PI_NT_kstart[m]+j;
+							}
+						}
+						else
+						{}
+					}
+
+					/*本地UW符号与接收UW符号共轭相关 搜索峰值*/
+					max_out = 0.;
+					max_pos = 0;
+
+					/*搜索位置*/
+					for (m=0; m<2*half_wind+1; m++) 
+					{
+						search_pos = PSTR_CSM_sync_time_parameter->I_State_Rx_ideal_pos-half_wind + m;
+						start_point = m + PSTR_CSM_sync_time_parameter->PI_NT_Rx_unicode_pos[0];
+						kk_len = PSTR_CSM_sync_time_parameter->PI_NT_PNB_mod_seg_tail[PSTR_CSM_sync_time_parameter->I_NT_PNB_seg_num-1];
+
+						/*校正相位*/
+						for (jj=0; jj<kk_len; jj++ )
+						{
+							temp = start_point+jj;
+							I_tmp_index = kk[jj] & 7;
+							Re_correct_phase_sig[jj] = Re_cpl_mul(PSTR_CSM_sync_time_parameter->PD_Re_correct_phase[sum_len+temp],PSTR_CSM_sync_time_parameter->PD_Im_correct_phase[sum_len+temp], PD_cos_table[I_tmp_index],-PD_sin_table[I_tmp_index]);
+							Im_correct_phase_sig[jj] = Im_cpl_mul(PSTR_CSM_sync_time_parameter->PD_Re_correct_phase[sum_len+temp],PSTR_CSM_sync_time_parameter->PD_Im_correct_phase[sum_len+temp], PD_cos_table[I_tmp_index],-PD_sin_table[I_tmp_index]);
+						}
+
+						Re_temp_sum = 0.;
+						Im_temp_sum = 0.;
+
+						/*本地UW符号与接收UW符号共轭相关*/
+						for (mm=0; mm< PSTR_CSM_sync_time_parameter->I_NT_Rx_unicode_pos_len; mm++)
+						{
+							temp = PSTR_CSM_sync_time_parameter->PI_NT_Rx_unicode_pos[mm]+ PSTR_CSM_sync_time_parameter->I_NT_PNB_DOWN_info1_len;
+							Re_temp_sum = Re_temp_sum + Re_cpl_mul(Re_mods[mm],Im_mods[mm], Re_correct_phase_sig[temp], -Im_correct_phase_sig[temp]);
+							Im_temp_sum = Im_temp_sum + Im_cpl_mul(Re_mods[mm],Im_mods[mm], Re_correct_phase_sig[temp], -Im_correct_phase_sig[temp]);
+						}
+						Re_sig_cor[m] = Re_temp_sum/PSTR_CSM_sync_time_parameter->I_NT_Rx_unicode_pos_len;
+						Im_sig_cor[m] = Im_temp_sum/PSTR_CSM_sync_time_parameter->I_NT_Rx_unicode_pos_len;
+						peak_cor[m] = my_ABS(Re_sig_cor[m] ,Im_sig_cor[m]);
+
+						/*找到最大值*/
+						if (peak_cor[m]> max_out)
+						{
+							/*最大值*/
+							max_out = peak_cor[m];
+							/*最大值 对应下标*/
+							max_pos = m;
+						}
+						else
+						{} 
+					}
+				}
+			}
+			else
+			{
+				/*本地UW符号与接收UW符号共轭相关 搜索峰值*/
+				max_out = 0.;
+				max_pos = 0;
+				
+				/*搜索位置*/
+				for (m=0; m<2*half_wind+1; m++)
+				{
+					search_pos = PSTR_CSM_sync_time_parameter->I_State_Rx_ideal_pos-half_wind + m;
+					start_point = m + PSTR_CSM_sync_time_parameter->PI_NT_Rx_unicode_pos[0];
+					kk_len = PSTR_CSM_sync_time_parameter->PI_NT_PNB_mod_seg_tail[PSTR_CSM_sync_time_parameter->I_NT_PNB_seg_num-1]-ceil(NT_HSN_left_s/2)*2;
+
+					/*校正相位*/
+					for (jj=0; jj<kk_len; jj++)
+					{
+						temp = start_point+jj;
+						I_tmp_index = kk[jj] & 7;
+						Re_correct_phase_sig[jj] = Re_cpl_mul(PSTR_CSM_sync_time_parameter->PD_Re_correct_phase[sum_len+ temp],PSTR_CSM_sync_time_parameter->PD_Im_correct_phase[sum_len+ temp], PD_cos_table[I_tmp_index],-PD_sin_table[I_tmp_index]);
+						Im_correct_phase_sig[jj] = Im_cpl_mul(PSTR_CSM_sync_time_parameter->PD_Re_correct_phase[sum_len+ temp],PSTR_CSM_sync_time_parameter->PD_Im_correct_phase[sum_len+ temp], PD_cos_table[I_tmp_index],-PD_sin_table[I_tmp_index]);
+					}
+
+					
+					Re_temp_sum = 0.;
+					Im_temp_sum = 0.;
+
+					/*本地UW符号与接收UW符号共轭相关*/
+					for (mm=0; mm<PSTR_CSM_sync_time_parameter->I_NT_Rx_unicode_pos_len; mm++)
+					{
+						temp = PSTR_CSM_sync_time_parameter->PI_NT_Rx_unicode_pos[mm]+ PSTR_CSM_sync_time_parameter->I_NT_PNB_DOWN_info1_len;
+						Re_temp_sum = Re_temp_sum+Re_cpl_mul(PSTR_CSM_sync_time_parameter->PD_NT_unicode_sym_real_part[mm],PSTR_CSM_sync_time_parameter->PD_NT_unicode_sym_imag_part[mm], Re_correct_phase_sig[temp], -Im_correct_phase_sig[temp]);
+						Im_temp_sum = Im_temp_sum+Im_cpl_mul(PSTR_CSM_sync_time_parameter->PD_NT_unicode_sym_real_part[mm],PSTR_CSM_sync_time_parameter->PD_NT_unicode_sym_imag_part[mm], Re_correct_phase_sig[temp], -Im_correct_phase_sig[temp]);
+					}
+					Re_sig_cor[m] = Re_temp_sum/PSTR_CSM_sync_time_parameter->I_NT_Rx_unicode_pos_len;
+					Im_sig_cor[m] = Im_temp_sum/PSTR_CSM_sync_time_parameter->I_NT_Rx_unicode_pos_len;
+					peak_cor[m] = my_ABS(Re_sig_cor[m],Im_sig_cor[m]);
+
+					/*找到最大值*/
+					if (peak_cor[m] > max_out)
+					{
+						/*最大值*/
+						max_out = peak_cor[m];
+						/*最大值 对应下标*/
+						max_pos = m;
+					}
+					else
+					{}
+				}
+
+
+			}
+
+			/*输出最大值*/
+			PSTR_CSM_sync_time_parameter->PD_pe[i] = max_out;
+			/*输出最大值 对应下标*/
+			PSTR_CSM_sync_time_parameter->PI_po[i] = max_pos+1;
+			PSTR_CSM_sync_time_parameter->PD_Re_h_h[i] = Re_sig_cor[max_pos];
+			PSTR_CSM_sync_time_parameter->PD_Im_h_h[i] = Im_sig_cor[max_pos];
+		}
+	}
+
+	for(i=0; i<PSTR_CSM_sync_time_parameter->I_Rx_ov; i++)
+	{
+		PSTR_CSM_sync_time_parameter->PI_po[i] = PSTR_CSM_sync_time_parameter->PI_po[i] + PSTR_CSM_sync_time_parameter->I_State_Rx_ideal_pos - half_wind - 1;
+	}
+
+	return 0;
+}
+
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_cfo_est;
+Function Description:
+	频偏估计;
+Inputs:
+	PD_in_cfo_est_real_part											：	输入，信号实部
+	PD_in_cfo_est_imag_part											：	输入，信号虚部
+	I_info_len														：	输入，信号长度
+	PSTR_cfo_est_parameter->PCH_NT_mod_type							：	输入，调制参数
+	PSTR_cfo_est_parameter->B_Params_cfo_est_method					:	方法标志位
+	PSTR_cfo_est_parameter->B_State_Rx_change_flag					:	
+	PSTR_cfo_est_parameter->I_cfoest_interframe						:
+	PSTR_cfo_est_parameter->PI_NT_Rx_unicode						：	输入，UW
+	PSTR_cfo_est_parameter->I_NT_Rx_unicode_len						：	输入，UW长度
+	PSTR_cfo_est_parameter->PI_NT_Rx_unicode_pos					：	输入，UW位置
+	PSTR_cfo_est_parameter->I_NT_Rx_ideal_pos						：	输入，UW理想位置
+	PSTR_cfo_est_parameter->I_basic_samplePerFrame					：	输入，一帧采样点数
+	PSTR_cfo_est_parameter->PI_Params_NT_Rx_unicode_numpergroup		:
+	PSTR_cfo_est_parameter->I_Params_NT_Rx_unicode_numpergroup_len	:
+	PSTR_cfo_est_parameter->PD_NT_Rx_unicode_GI  					：	输入，UW GI
+	PSTR_cfo_est_parameter->I_NT_Rx_unicode_GI_len  				：	输入，UW GI 长度
+	PSTR_cfo_est_parameter->D_Params_ang_max						:	弧度限制值，应为正数
+
+	PSTR_cfo_est_parameter->PD_State_sig_cfo_real_part  			：	输出(输入)， 一帧累加结果
+	PSTR_cfo_est_parameter->PD_State_sig_cfo_imag_part 				：	输出(输入)， 一帧累加结果
+	PSTR_cfo_est_parameter->PD_ofre_off								：	输出，频偏
+Outputs:
+	返回0：正常；
+	返回1：超过限制角度，有输出；
+	返回2：弧度限制值非法
+
+Notes: 
+**************************************************************************/
+int CSM_cfo_est (double PD_in_cfo_est_real_part[], double PD_in_cfo_est_imag_part[], int I_info_len, Cfo_Est_Para *PSTR_cfo_est_parameter)
+{
+	int		i,j;
+	int		I_sum_numpergroup;
+	int		I_index;
+	int		I_symbol_QPSK;
+	double	D_ang_sum_real;
+	double	D_ang_sum_imag;
+	double	D_sig_power_real;
+	double	D_sig_power_imag;
+	double	D_sig_power_tmp;
+	double	D_ang_dif_real2;
+	double	D_ang_dif_imag2;
+	double	D_sum_sig_cor_cf_real;
+	double	D_sum_sig_cor_cf_imag;
+	double	D_sum_NT_Rx_unicode_GI;
+	double	D_sum_ang_dif;
+	double  D_ang_dif_real;
+	double  D_ang_dif_imag;
+	double	PD_ang_dif[50];
+	double	PD_sum_sig_real[50] = {0};
+	double	PD_sum_sig_imag[50] = {0};
+	double	PD_sig_cor_cf_real[200];
+	double	PD_sig_cor_cf_imag[200];
+	double	D_mul_cof;
+	double	D_mod_ang;
+	double	Re_mods[200];
+	double	Im_mods[200];
+	double	D_complex_symbol_real_part[4] = {1.0,0.0, 0.0,-1.0};
+	double	D_complex_symbol_imag_part[4] = {0.0,1.0,-1.0, 0.0};
+
+	if (!strcmp(PSTR_cfo_est_parameter->PCH_NT_mod_type,"CBPSK"))
+	{
+		for(i=0; i<PSTR_cfo_est_parameter->I_NT_Rx_unicode_len; i++)
+		{
+			Re_mods[i] = 1 - 2*(PSTR_cfo_est_parameter->PI_NT_Rx_unicode[i]);
+			Im_mods[i] = 0;
+		}
+		D_mod_ang = DOUBLE_PI;
+		D_mul_cof = 1;
+	}
+	else
+	{
+		/*调制*/
+		for(i=0,j=0; i<PSTR_cfo_est_parameter->I_NT_Rx_unicode_len; i+=2,j++)
+		{
+			I_symbol_QPSK = (PSTR_cfo_est_parameter->PI_NT_Rx_unicode[i]<<1) + PSTR_cfo_est_parameter->PI_NT_Rx_unicode[i+1];
+			Re_mods[j] = D_complex_symbol_real_part[I_symbol_QPSK];
+			Im_mods[j] = D_complex_symbol_imag_part[I_symbol_QPSK];
+		}
+
+		if (strcmp(PSTR_cfo_est_parameter->PCH_NT_mod_type,"8PSK"))
+		{
+			D_mod_ang = DOUBLE_PI/2;
+			D_mul_cof = 2;
+		}
+		else
+		{
+			D_mod_ang = DOUBLE_PI/4;
+			D_mul_cof = 4;
+		}
+	}
+
+	/*选择方式*/
+	if (PSTR_cfo_est_parameter->B_Params_cfo_est_method == 0)
+	{
+		for(i=0; i<PSTR_cfo_est_parameter->I_NT_Rx_unicode_pos_len; i++)
+		{
+			I_index = PSTR_cfo_est_parameter->I_NT_Rx_ideal_pos + PSTR_cfo_est_parameter->PI_NT_Rx_unicode_pos[i] - 1;
+			PD_sig_cor_cf_real[i] = Re_com_conj_mul(PD_in_cfo_est_real_part[I_index],PD_in_cfo_est_imag_part[I_index],Re_mods[i],Im_mods[i]);
+			PD_sig_cor_cf_imag[i] = Im_com_conj_mul(PD_in_cfo_est_real_part[I_index],PD_in_cfo_est_imag_part[I_index],Re_mods[i],Im_mods[i]);
+		}
+
+		if (PSTR_cfo_est_parameter->B_State_Rx_change_flag == 0 || PSTR_cfo_est_parameter->I_cfoest_interframe == 0)
+		{
+			for (i=0; i<PSTR_cfo_est_parameter->I_Params_NT_Rx_unicode_numpergroup_len; i++)
+			{
+				if (i == 0)
+				{
+					for (j=0; j<PSTR_cfo_est_parameter->PI_Params_NT_Rx_unicode_numpergroup[i]; j++)
+					{
+						PD_sum_sig_real[i] += PD_sig_cor_cf_real[j];
+						PD_sum_sig_imag[i] += PD_sig_cor_cf_imag[j];
+					}	
+				}
+				else
+				{
+					I_sum_numpergroup = 0;
+					for (j=0; j<i; j++)
+					{
+						I_sum_numpergroup += PSTR_cfo_est_parameter->PI_Params_NT_Rx_unicode_numpergroup[j];
+					}
+					for (j=0; j<PSTR_cfo_est_parameter->PI_Params_NT_Rx_unicode_numpergroup[i]; j++)
+					{
+						PD_sum_sig_real[i] += PD_sig_cor_cf_real[j+I_sum_numpergroup];
+						PD_sum_sig_imag[i] += PD_sig_cor_cf_imag[j+I_sum_numpergroup];
+					}
+				}
+			}
+
+			if (PSTR_cfo_est_parameter->D_Params_ang_max < 0)
+			{
+				return 2;
+			}
+
+			D_sum_ang_dif = 0;
+			for (i=0; i<PSTR_cfo_est_parameter->I_Params_NT_Rx_unicode_numpergroup_len-1; i++)
+			{
+				D_ang_dif_real = Re_com_conj_mul(PD_sum_sig_real[i+1],PD_sum_sig_imag[i+1],PD_sum_sig_real[i],PD_sum_sig_imag[i]);
+				D_ang_dif_imag = Im_com_conj_mul(PD_sum_sig_real[i+1],PD_sum_sig_imag[i+1],PD_sum_sig_real[i],PD_sum_sig_imag[i]);
+				PD_ang_dif[i] = atan2(D_ang_dif_imag,D_ang_dif_real);
+				D_sum_ang_dif += PD_ang_dif[i];
+
+				/*限制角度*/
+				if (PD_ang_dif[i]>PSTR_cfo_est_parameter->D_Params_ang_max || PD_ang_dif[i]<-PSTR_cfo_est_parameter->D_Params_ang_max)
+				{
+					/*输出*/
+					PSTR_cfo_est_parameter->PD_ofre_off[0] = 0;
+
+					PSTR_cfo_est_parameter->PD_State_sig_cfo_real_part[0] = 0;
+					PSTR_cfo_est_parameter->PD_State_sig_cfo_imag_part[0] = 0;
+					for (j=0; j<PSTR_cfo_est_parameter->I_NT_Rx_unicode_len/2; j++)
+					{
+						PSTR_cfo_est_parameter->PD_State_sig_cfo_real_part[0] += PD_sig_cor_cf_real[j];
+						PSTR_cfo_est_parameter->PD_State_sig_cfo_imag_part[0] += PD_sig_cor_cf_imag[j];
+					}
+					return 1;
+				}
+			}
+
+			/*计算频偏*/
+			D_sum_NT_Rx_unicode_GI = 0;
+			for (i=0; i<PSTR_cfo_est_parameter->I_NT_Rx_unicode_GI_len; i++)
+			{
+				D_sum_NT_Rx_unicode_GI += PSTR_cfo_est_parameter->PD_NT_Rx_unicode_GI[i];
+			}
+			PSTR_cfo_est_parameter->PD_ofre_off[0]	= D_sum_ang_dif / D_sum_NT_Rx_unicode_GI;
+
+			/*输出*/
+			PSTR_cfo_est_parameter->PD_State_sig_cfo_real_part[0] = 0;
+			PSTR_cfo_est_parameter->PD_State_sig_cfo_imag_part[0] = 0;
+			for (j=0; j<PSTR_cfo_est_parameter->I_NT_Rx_unicode_pos_len; j++)
+			{
+				PSTR_cfo_est_parameter->PD_State_sig_cfo_real_part[0] += PD_sig_cor_cf_real[j];
+				PSTR_cfo_est_parameter->PD_State_sig_cfo_imag_part[0] += PD_sig_cor_cf_imag[j];
+			}
+
+		}
+		else
+		{
+			D_sum_sig_cor_cf_real = 0;
+			D_sum_sig_cor_cf_imag = 0;
+			for (i=0; i<PSTR_cfo_est_parameter->I_NT_Rx_unicode_pos_len; i++)
+			{
+				D_sum_sig_cor_cf_real += PD_sig_cor_cf_real[i];
+				D_sum_sig_cor_cf_imag += PD_sig_cor_cf_imag[i];
+			}
+			D_ang_dif_real = Re_com_conj_mul(D_sum_sig_cor_cf_real,D_sum_sig_cor_cf_imag,PSTR_cfo_est_parameter->PD_State_sig_cfo_real_part[0],PSTR_cfo_est_parameter->PD_State_sig_cfo_imag_part[0]);
+			D_ang_dif_imag = Im_com_conj_mul(D_sum_sig_cor_cf_real,D_sum_sig_cor_cf_imag,PSTR_cfo_est_parameter->PD_State_sig_cfo_real_part[0],PSTR_cfo_est_parameter->PD_State_sig_cfo_imag_part[0]);
+			
+			PSTR_cfo_est_parameter->PD_ofre_off[0] = atan2(D_ang_dif_imag,D_ang_dif_real) / PSTR_cfo_est_parameter->I_basic_samplePerFrame;
+			PSTR_cfo_est_parameter->PD_State_sig_cfo_real_part[0] = D_sum_sig_cor_cf_real;
+			PSTR_cfo_est_parameter->PD_State_sig_cfo_imag_part[0] = D_sum_sig_cor_cf_imag;
+		}
+	}
+	else
+	{
+		D_ang_dif_real = 0;
+		D_ang_dif_imag = 0;
+		D_ang_dif_real2 = 0;
+		D_ang_dif_imag2 = 0;
+		for (i=0; i<(I_info_len-20)/2; i++)
+		{
+			D_sig_power_real = Re_cpl_sqr(PD_in_cfo_est_real_part[i+10],PD_in_cfo_est_imag_part[i+10]);
+			D_sig_power_imag = Im_cpl_sqr(PD_in_cfo_est_real_part[i+10],PD_in_cfo_est_imag_part[i+10]);
+			for (j=0; j<D_mul_cof; j+=2)
+			{
+				D_sig_power_tmp = Re_cpl_sqr(D_sig_power_real,D_sig_power_imag);
+				D_sig_power_imag = Im_cpl_sqr(D_sig_power_real,D_sig_power_imag);
+				D_sig_power_real = D_sig_power_tmp;			
+			}
+
+			D_ang_dif_real += D_sig_power_real;
+			D_ang_dif_imag += D_sig_power_imag;
+		}
+		for (i=0; i<(I_info_len-20)/2; i++)
+		{
+			D_sig_power_real = Re_cpl_sqr(PD_in_cfo_est_real_part[i+10+(I_info_len-20)/2],PD_in_cfo_est_imag_part[i+10+(I_info_len-20)/2]);
+			D_sig_power_imag = Im_cpl_sqr(PD_in_cfo_est_real_part[i+10+(I_info_len-20)/2],PD_in_cfo_est_imag_part[i+10+(I_info_len-20)/2]);
+			for (j=0; j<D_mul_cof; j+=2)
+			{
+				D_sig_power_tmp = Re_cpl_sqr(D_sig_power_real,D_sig_power_imag);
+				D_sig_power_imag = Im_cpl_sqr(D_sig_power_real,D_sig_power_imag);
+				D_sig_power_real = D_sig_power_tmp;			
+			}
+
+			D_ang_dif_real2 += D_sig_power_real;
+			D_ang_dif_imag2 += D_sig_power_imag;
+		}
+
+		D_ang_sum_real = Re_com_conj_mul(D_ang_dif_real2,D_ang_dif_imag2,D_ang_dif_real,D_ang_dif_imag);
+		D_ang_sum_imag = Im_com_conj_mul(D_ang_dif_real2,D_ang_dif_imag2,D_ang_dif_real,D_ang_dif_imag);
+		
+		D_mul_cof = atan2(D_ang_sum_imag,D_ang_sum_real);
+
+		PSTR_cfo_est_parameter->PD_ofre_off[0] = atan2(D_ang_sum_imag,D_ang_sum_real) / (((I_info_len-20)/2)*2*2);
+
+	}
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_turbo_enc;
+Function Description:
+	turbo编码;
+Inputs:
+	PI_in_turbo_enc		:	输入信息序列指针；
+	I_code_length		：	输入信息序列长度；	
+	PI_out_turbo_enc	：	输出信息序列指针；
+	I_out_len	：	输入“输出信息序列长度”；
+Outputs:
+	返回0:正常;
+	返回9：长度不合法;
+Notes:
+***********************************************************/
+int CSM_turbo_enc(int *PI_in_turbo_enc, int I_code_length, int *PI_out_turbo_enc,int I_out_len)
+{
+	int i;
+	int xout_doule[4000];
+	int xout1_doule[4000];
+	int xinter_doule[4000];
+	int yout1_doule[4050];
+	int tail1_doule[50];
+	int yout2_doule[4050];
+	int tail2_doule[50];
+
+	int PI_in_prt[8500];
+	int PI_out_turbo_len[1];
+	int I_code_memory = 3;
+	int I_denominator = 13;
+	int I_numerator = 11;
+	int I_tailed = 1;
+
+	int result;
+
+	if(I_code_length>4000 || I_code_memory*I_tailed>50)
+	{
+		return 9;
+	}
+
+	*PI_out_turbo_len=2*(I_code_length+I_code_memory*I_tailed)+2*(I_code_memory*I_tailed);
+	
+	memcpy(xout_doule,PI_in_turbo_enc,I_code_length*sizeof(int));
+
+	if(interleaver(xout_doule, I_code_length,xinter_doule))
+		return 9;
+	if(rsc_encoder(I_code_memory,I_denominator,I_numerator,I_tailed,I_code_length,xout_doule,xout1_doule,yout1_doule,tail1_doule))
+		return 9;
+	if(rsc_encoder(I_code_memory,I_denominator,I_numerator,I_tailed,I_code_length,xinter_doule,xout1_doule,yout2_doule,tail2_doule))
+		return 9;
+
+	//memcpy(PI_in_prt,yout1_doule,(I_code_length+I_code_memory*I_tailed)*sizeof(int));
+	//memcpy((PI_in_prt+(I_code_length+I_code_memory*I_tailed)),tail1_doule,I_code_memory*I_tailed*sizeof(int));
+	//memcpy((PI_in_prt+((I_code_length+I_code_memory*I_tailed)+I_code_memory*I_tailed)),yout2_doule,(I_code_length+I_code_memory*I_tailed)*sizeof(int));
+	//memcpy((PI_in_prt+(2*(I_code_length+I_code_memory*I_tailed)+I_code_memory*I_tailed)),tail2_doule,I_code_memory*I_tailed*sizeof(int));
+	memcpy(PI_in_prt,yout1_doule,I_code_length*sizeof(int));
+	memcpy((PI_in_prt+((I_code_length+I_code_memory*I_tailed)+I_code_memory*I_tailed)),yout2_doule,I_code_length*sizeof(int));
+	for(i=0; i<3; i++ )
+	{
+		PI_in_prt[I_code_length+2*i] = tail1_doule[i];
+	}
+	for(i=0; i<3; i++ )
+	{
+		PI_in_prt[I_code_length+2*i+1] = yout1_doule[I_code_length+i];
+	}
+	for(i=0; i<3; i++ )
+	{
+		PI_in_prt[2*I_code_length+2*I_code_memory*I_tailed+2*i] = tail2_doule[i];
+	}
+	for(i=0; i<3; i++ )
+	{
+		PI_in_prt[2*I_code_length+2*I_code_memory*I_tailed+2*i+1] = yout1_doule[I_code_length+i];
+	}
+
+	result = rate_matching(PI_in_turbo_enc, I_code_length, PI_in_prt, *PI_out_turbo_len, PI_out_turbo_enc, I_out_len);
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	turbo_dec;
+Function Description:
+	turbo译码;
+Inputs:
+	PD_in_turbo_enc		:	输入信息序列指针；
+	I_source_info_len	：	输入源信息(不含turbo校验位)序列长度；
+	I_actual_info_length:	输入待译码信息(含turbo校验位)序列长度；
+	PD_out_turbo_enc	：	输出信息序列指针；
+	PI_out_turbo_len	：	输出信息序列长度；
+	PB_crc_ok			:	输入CRC检错结果标志位，1为正确，0为错误；
+	I_code_memory		：	输入卷积码编码器中寄存器个数；
+	I_denominator		：	输入编码长度，每次编码输出卷积码编码器的bit数；
+	I_numerator			：	输入码元长度，即每次编码输入卷积码编码器的bit数；
+	I_tailed			：	输入是否为咬尾卷积码；
+	G					：	输入CRC校验生成多项式；
+	len_G				:	输入生成多项式长度；
+	Tc_iteration_num	：	输入最多迭代次数；
+	D_tc_max			：	输入软信息限制幅度；
+Outputs:
+	返回0：正常;
+	返回1：速率匹配错误;
+	返回9：长度不合法;
+Notes:
+***********************************************************/
+int turbo_dec(double *PD_in_turbo_dec, int I_source_info_len, int I_actual_info_length, int *PI_out_turbo_dec, int *PI_out_turbo_dec_len, int *PB_crc_ok, int I_code_memory,int I_denominator,int I_numerator,int I_tailed,
+			  int I_parity_so, int *G, int len_G,int Tc_iteration_num, int RACH_SB_MAK_MAP,int *RACH_SB_MAK, double D_tc_max)
+{
+	long double LMAX=10000000000.0000;
+	int i,j;
+	int check_sum_d=0;
+	int result;
+
+	double new_tail[3];
+ 	
+	double PD_out_de_rate[13000];
+	double *xx = NULL;
+	double *yy1 = NULL;
+	double *tt1 = NULL;
+	double *yy2 = NULL;
+	double *tt2 = NULL;
+
+	double x[4000]; 
+ 	double y1[4050]; 
+ 	double y2[4050];
+ 	double t1[50];
+ 	double t2[50];
+
+ 	double f_x[4000];
+	double f_y1[4050];
+	double f_y2[4050];
+	double f_t1[50];
+	double f_t2[50];
+
+	double temp[4050];
+ 	double temp_inter[4050];
+	double LL_out[4050];
+ 	double xe_out[4050];
+	double ye_out[4050];
+ 	double z[4050];
+ 	double temp_LL[4050];
+ 	int d[4050];
+	int d1[4050];
+
+	if(I_source_info_len > 4000)
+	{
+		return 9;
+	}
+
+	for(i=0; i<I_actual_info_length; i++)
+	{
+		if (PD_in_turbo_dec[i]<D_tc_max && PD_in_turbo_dec[i]>-D_tc_max)
+		{}
+		else if (PD_in_turbo_dec[i]>D_tc_max)
+		{
+			PD_in_turbo_dec[i] = D_tc_max;
+		}
+		else
+		{
+			PD_in_turbo_dec[i] = -D_tc_max;
+		}
+		PD_in_turbo_dec[i] = exp(PD_in_turbo_dec[i]);
+	}
+
+	result = de_rate_matching(PD_in_turbo_dec, I_actual_info_length, PD_out_de_rate, I_source_info_len, (PD_out_de_rate+I_source_info_len), (2*I_source_info_len+12), 1);
+	if (result)
+	{
+		return 1;
+	}
+
+	for(i=0; i<I_code_memory*I_tailed; i++)
+	{
+		new_tail[i] = PD_out_de_rate[I_source_info_len*2+2*i];
+	}
+	for(i=0; i<I_code_memory*I_tailed; i++)
+	{
+		PD_out_de_rate[I_source_info_len*2+i] = PD_out_de_rate[I_source_info_len*2+2*i+1];
+	}
+	for(i=0; i<I_code_memory*I_tailed; i++)
+	{
+		PD_out_de_rate[I_source_info_len*2+I_code_memory*I_tailed+i] = new_tail[i];
+	}
+
+	for(i=0; i<I_code_memory*I_tailed; i++)
+	{
+		new_tail[i] = PD_out_de_rate[I_source_info_len*3+2*I_code_memory*I_tailed+2*i];
+	}
+	for(i=0; i<I_code_memory*I_tailed; i++)
+	{
+		PD_out_de_rate[I_source_info_len*3+2*I_code_memory*I_tailed+i] = PD_out_de_rate[I_source_info_len*3+2*I_code_memory*I_tailed+2*i+1];
+	}
+	for(i=0; i<I_code_memory*I_tailed; i++)
+	{
+		PD_out_de_rate[I_source_info_len*3+3*I_code_memory*I_tailed+i] = new_tail[i];
+	}
+
+	xx = PD_out_de_rate;
+	yy1 = PD_out_de_rate + I_source_info_len;
+	tt1 = PD_out_de_rate + 2*I_source_info_len + I_code_memory*I_tailed;
+	yy2 = PD_out_de_rate + 2*I_source_info_len + 2*I_code_memory*I_tailed;
+	tt2 = PD_out_de_rate + 3*I_source_info_len + 3*I_code_memory*I_tailed;
+
+	for(i=0;i<(I_source_info_len+I_code_memory*I_tailed*I_parity_so);i++)
+	{
+		*(z+i)=1;
+	}
+	
+ 	Llimiter(xx,I_source_info_len,LMAX,x);
+ 	Llimiter(yy1,(I_source_info_len+I_code_memory*I_tailed),LMAX,y1);
+ 	Llimiter(tt1,(I_code_memory*I_tailed),LMAX,t1);
+ 	Llimiter(yy2,(I_source_info_len+I_code_memory*I_tailed),LMAX,y2);
+ 	Llimiter(tt2,(I_code_memory*I_tailed),LMAX,t2);
+ 	
+	for(i=0;i<(I_source_info_len+I_code_memory*I_tailed);i++)
+	{
+		*(f_y1+i)=(double)*(y1+i);
+		*(f_y2+i)=(double)*(y2+i);
+	}
+	for(i=0;i<(I_code_memory*I_tailed);i++)
+	{
+		*(f_t1+i)=(double)*(t1+i);
+		*(f_t2+i)=(double)*(t2+i);
+	}
+	for(i=0;i<(I_source_info_len);i++)
+	{
+		*(f_x+i)=(double)*(x+i);
+	}
+
+ 	for(i=0;i<Tc_iteration_num;i++)
+	{
+		for(j=0;j<(I_source_info_len+I_code_memory*I_tailed*I_parity_so);j++)
+		{
+			*(temp+j)=(*(f_x+j))*(*(z+j));
+		}
+		rsc_decoder(I_code_memory,I_denominator,I_numerator,I_tailed,I_parity_so,I_source_info_len,temp,f_y1,f_t1,LL_out,xe_out,ye_out);
+
+		for(j=0;j<(I_source_info_len+I_code_memory*I_tailed*I_parity_so);j++)
+		{
+			*(z+j)=*(xe_out+j);
+		}
+		for(j=0;j<(I_source_info_len+I_code_memory*I_tailed*I_parity_so);j++)
+		{
+			*(temp+j)=(*(f_x+j))*(*(z+j));
+		}
+		interleaver_double(temp, (I_source_info_len+I_code_memory*I_tailed*I_parity_so),temp_inter);
+		rsc_decoder(I_code_memory,I_denominator,I_numerator,I_tailed,I_parity_so,I_source_info_len,temp_inter,f_y2,f_t2,LL_out,xe_out,ye_out);
+		deinterleaver(xe_out, (I_source_info_len+I_code_memory*I_tailed*I_parity_so),z);
+		deinterleaver(LL_out, (I_source_info_len+I_code_memory*I_tailed*I_parity_so),temp_LL);
+		decision(temp_LL,(I_source_info_len+I_code_memory*I_tailed*I_parity_so),d);
+		if(RACH_SB_MAK_MAP)
+		{
+			for(j=(I_source_info_len+I_code_memory*I_tailed*I_parity_so)-8;j<(I_source_info_len+I_code_memory*I_tailed*I_parity_so);j++)
+			{
+				*(d+j)=(*(d+j)) ^ (*(RACH_SB_MAK+j-(I_source_info_len+I_code_memory*I_tailed*I_parity_so)+8));
+			}
+		}
+
+		for(j=0;j<(I_source_info_len+I_code_memory*I_tailed*I_parity_so);j++)
+		{
+			PI_out_turbo_dec[j]=d[j];
+		}
+		*PB_crc_ok=0;
+		if(len_G)
+		{
+			*PI_out_turbo_dec_len = I_source_info_len - len_G + 1;
+			*PB_crc_ok = de_crc_check(d,G,PI_out_turbo_dec,len_G,(I_source_info_len+I_code_memory*I_tailed*I_parity_so));
+			if(*PB_crc_ok)
+			{
+				return 0;
+			}
+		}
+		else
+		{
+			*PI_out_turbo_dec_len = I_source_info_len;
+			if(i>0)
+			{
+				check_sum_d = 0;
+				for(j=0;j<(I_source_info_len+I_code_memory*I_tailed*I_parity_so);j++)
+				{
+					if(d1[j]!=d[j])
+					{
+						check_sum_d++;
+						break;
+					}
+				}
+				if(check_sum_d==0)
+				{
+					*PB_crc_ok = 1;
+					for(j=0;j<(I_source_info_len+I_code_memory*I_tailed*I_parity_so);j++)
+					{
+						PI_out_turbo_dec[j]=d[j];
+					}
+					/*return 1*/;
+				}
+			}
+			for(j=0;j<(I_source_info_len+I_code_memory*I_tailed*I_parity_so);j++)
+			{
+				d1[j]=d[j];
+			}
+		}
+		
+	}
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_FFT;
+Function Description:
+	快速傅里叶变换;
+Inputs:
+	PD_in_FFT_real_part	：输入双精度信息序列实部，最后存放变换结果的实部；
+	PD_in_FFT_imag_part	：输入双精度信息序列虚部，最后存放变换结果的虚部；
+	I_info_len			：输出信息序列长度，必须是2的整数次幂,输入信息长度不足时后补零；
+	B_div_flag			: 需要在输出前除（I_info_len平方根）的应为1，否则为0；
+Outputs:
+	返回0：正常
+	返回1：信息长度不合法
+	返回9：输入长度不合法
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_FFT( double *PD_in_FFT_real_part, double *PD_in_FFT_imag_part, int I_info_len, int B_div_flag)
+{ 
+	int		i,j,k,i1,i2,i3,n2,n4,id,is;
+	int		I_power_flag = 0;
+	int		I_power = 0;
+	double	t1,e,t3,r1,r2,e3;
+	double	s1,s2,s3,cc1,cc3,ss1,ss3,cc,ss,c,s;
+	double  D_N_sqrt = sqrt((double)I_info_len);
+
+	if (I_info_len <= 0)
+	{
+		return 1;
+	}
+
+	/*2^I_power=I_info_len*/
+	k = I_info_len;
+	for(i=0; i<(sizeof(int)*8-2); i++) 
+	{
+		if (k & 1)
+		{
+			if (k != 1)
+			{
+				return 1;
+			}
+			else
+			{
+				I_power = i;
+				break;
+			}
+		}
+		k = k >> 1;
+	}   
+  
+	/*需I_power-1次分级运算*/
+	n2 = 2 * I_info_len;
+	for(k=1; k<I_power; k++) 
+	{ 
+		/*n2=2^(I_power+1-k)*/
+		n2 = n2 / 2;       
+		/*n4=2^(I_power-k-1)*/
+		n4 = n2 / 4;          
+		e = 6.28318530718 / n2; 
+		e3 = 3 * e;
+		cc1 = 1.0; 
+		ss1 = 0.0;
+		cc3 = 1.0; 
+		ss3 = 0.0;
+		cc = cos(e); 
+		ss = sin(e);
+		c = cos(e3); 
+		s = sin(e3);
+
+		/*奇序号项及其对应的旋转因子个数*/
+		for(j=0; j<n4; j++)    
+		{ 
+			is = j;
+			id = 2 * n2;
+			do
+			{
+				/*i控制进入下一组，对应的旋转因子相同*/
+				for(i=is; i<(I_info_len-1); i=i+id) 
+				{ 
+					i1 = i + n4;
+					i2 = i1 + n4;
+					i3 = i2 + n4;
+
+					/*一次循环中的第一部分碟形运算*/
+					r1 = PD_in_FFT_real_part[i] - PD_in_FFT_real_part[i2];
+					PD_in_FFT_real_part[i] = PD_in_FFT_real_part[i] + PD_in_FFT_real_part[i2];
+					r2 = PD_in_FFT_real_part[i1] - PD_in_FFT_real_part[i3];
+					PD_in_FFT_real_part[i1] = PD_in_FFT_real_part[i1] + PD_in_FFT_real_part[i3];
+					s1 = PD_in_FFT_imag_part[i] - PD_in_FFT_imag_part[i2];
+					PD_in_FFT_imag_part[i] = PD_in_FFT_imag_part[i] + PD_in_FFT_imag_part[i2];
+					s2 = PD_in_FFT_imag_part[i1] - PD_in_FFT_imag_part[i3];
+					PD_in_FFT_imag_part[i1] = PD_in_FFT_imag_part[i1] + PD_in_FFT_imag_part[i3];
+
+					/*第2部分碟形运算*/
+					s3 = r1 - s2;    /*r1、-s2为对应的实部和虚部*/
+					r1 = r1 + s2;    /*s3、-r2为对应的实部和虚部*/
+					s2 = r2 - s1;
+					r2 = r2 + s1;
+					PD_in_FFT_real_part[i2] = r1*cc1 - s2*ss1;  /*与对应的旋转因子相乘*/
+					PD_in_FFT_imag_part[i2] = -s2*cc1 - r1*ss1;
+					PD_in_FFT_real_part[i3] = s3*cc3 + r2*ss3;
+					PD_in_FFT_imag_part[i3] = r2*cc3 - s3*ss3;
+				}	  
+				is = 2*id - n2 + j;
+				id = 4 * id;
+			}while(is < (I_info_len-1));
+
+			/*复数相乘实现求下一组旋转因子*/
+			t1 = cc1; 
+			t3 = cc3;        
+			cc1 = cc1*cc - ss1*ss;
+			ss1 = ss1*cc + t1*ss;
+			cc3 = cc3*c - ss3*s;
+			ss3 = ss3*c + t3*s;
+		}
+	
+	}
+	/*作最后的蝶形运算*/
+	is = 0;
+	id = 4;
+	do
+	{
+		/*对分裂基后留下的偶数序号部分*/
+		for(i=is; i<I_info_len; i=i+id)   
+		{ 
+			/*做基2运算*/
+			i1 = i + 1;              
+			r1 = PD_in_FFT_real_part[i];
+			r2 = PD_in_FFT_imag_part[i];
+			PD_in_FFT_real_part[i] = r1+PD_in_FFT_real_part[i1];
+			PD_in_FFT_imag_part[i] = r2+PD_in_FFT_imag_part[i1];
+			PD_in_FFT_real_part[i1] = r1-PD_in_FFT_real_part[i1];
+			PD_in_FFT_imag_part[i1] = r2-PD_in_FFT_imag_part[i1];
+		}
+		is = 2*id - 2;
+		id = 4 * id;
+	} while(is<(I_info_len-1));
+
+	/*实现位倒序*/
+	bitrev(I_info_len,PD_in_FFT_real_part,PD_in_FFT_imag_part); 
+ 
+	if (B_div_flag == 1)
+	{
+		for (i=0; i<I_info_len; i++)
+		{
+			PD_in_FFT_real_part[i] /= D_N_sqrt;
+			PD_in_FFT_imag_part[i] /= D_N_sqrt;
+		}
+	}
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_6PSK;
+Function Description:
+	对信息序列进行6PSK调制;
+Inputs:
+	PI_in_6PSK				：待调制信息序列数组指针,PI_in_6PSK[0]为最高位;
+	PD_out_6PSK_real_part	：输出6PSK调制后实部信息序列数组指针,PD_out_6PSK_real_part[0]为最高位;
+	PD_out_6PSK_imag_part	：输出6PSK调制后虚部信息序列数组指针,PD_out_6PSK_imag_part[0]为最高位;
+	I_info_len				：信息序列数组PI_in_6PSK长度;
+Outputs:
+	返回0:正常;1:信息序列长度错误;
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_6PSK(int *PI_in_6PSK,double *PD_out_6PSK_real_part,double *PD_out_6PSK_imag_part,int I_info_len)
+{
+	int i;
+	double PD_complex_symbol_real_part[6] = {1.0,			  -0.5,				 -0.5,-1.0,			 	 0.5,				0.5};
+	double PD_complex_symbol_imag_part[6] = {0.0,0.866025403784439,-0.866025403784439, 0.0,0.866025403784439,-0.866025403784439};
+	
+
+	/*查表输出*/
+	for(i=0; i<I_info_len; i++)
+	{
+		PD_out_6PSK_real_part[i] = PD_complex_symbol_real_part[PI_in_6PSK[i]];
+		PD_out_6PSK_imag_part[i] = PD_complex_symbol_imag_part[PI_in_6PSK[i]];
+	}
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_RS_enc;
+Function Description:
+	9-15 RS编码;
+Inputs:
+	PI_in_RS	：输入信息序列指针，9位16进制；
+	PI_out_RS	：输出信息序列指针，15位16进制；
+Outputs:
+	返回0：正常
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_RS_enc(int *PI_in_RS, int *PI_out_RS)
+{
+	int i,j;
+	int PI_parity[6] = {0};
+	int PI_g[6] = {6,9,6,4,14,10};
+	int PI_exp_table[15] = {4,2,1,12,6,3,13,10,5,14,7,15,11,9,8};
+	int PI_log_table[15] = {3,2,6,1,9,5,11,15,14,8,13,4,7,10,12};
+	int I_feedback = 0;
+	int I_gf_exp[6] = {0};
+	
+
+	/*计算RS编码校验位*/
+	for(i=0; i<BACH_IN_INFO_LEN; i++)
+	{
+		I_feedback = PI_in_RS[i] ^ PI_parity[5];
+		
+		for(j=5; j>0; j--)
+		{
+			PI_parity[j] = PI_parity[j-1];
+		}
+		PI_parity[0] = 0;
+		
+		for(j=0; j<6; j++)
+		{
+			if (I_feedback == 0)
+			{
+				I_gf_exp[j] = 0;
+			}
+			else
+			{
+				I_gf_exp[j] = PI_exp_table[(PI_g[j]+PI_log_table[I_feedback-1]-1)%15];
+			}
+			PI_parity[j] = PI_parity[j] ^ I_gf_exp[j];
+		}
+
+	}
+
+	/*RS编码输出赋值*/
+	memcpy(PI_out_RS,PI_in_RS,BACH_IN_INFO_LEN*sizeof(int));
+	for(i=0; i<6; i++)
+	{
+		PI_out_RS[BACH_IN_INFO_LEN+i] = PI_parity[5-i];
+	}
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_data_combiner;
+Function Description:
+	数据合并;
+Inputs:
+	PS_in_data_real_part	：输入short信息序列实部(例：1，2，3，4)；
+	PS_in_data_imag_part	：输入short信息序列虚部(例：5，6，7，8)；
+	PS_out_data_combined	：输出short合并后的信息序列(例：1，5，2，6，3，7，4，8)；
+	I_info_len				：输入的信息序列长度，即实部长度；
+Outputs:
+	返回0：正常
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+
+int CSM_data_combiner(short *PS_in_data_real_part, short *PS_in_data_imag_part, short *PS_out_data_combined, int I_info_len)
+{
+	int i;
+
+	for(i=0; i<I_info_len; i++)
+	{
+		PS_out_data_combined[2*i] = PS_in_data_real_part[i];
+		PS_out_data_combined[2*i + 1] = PS_in_data_imag_part[i];
+	}
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_data_separater;
+Function Description:
+	数据分离;
+Inputs:
+	PS_in_data_combined		：输入short信息序列指针(例：1，5，2，6，3，7，4，8)；
+	PD_out_data_real_part	：输出double信息序列实部指针(例：1.0，2.0，3.0，4.0)；
+	PD_out_data_imag_part	：输入double信息序列虚部指针(例：5.0，6.0，7.0，8.0)；
+	I_info_len				：输出的信息序列长度，即实部长度；
+Outputs:
+	返回0：正常
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+
+int CSM_data_separater(short *PS_in_data_combined, double *PD_out_data_real_part, double *PD_out_data_imag_part, int I_info_len)
+{
+	int i;
+
+	for(i=0; i<I_info_len; i++)
+	{
+		PD_out_data_real_part[i] = (double)PS_in_data_combined[2*i];
+		PD_out_data_imag_part[i] = (double)PS_in_data_combined[2*i+1];
+	}
+
+	return 0;
+}
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CMS_FCCH_receiver;
+Function Description:
+	FCCH接收函数;
+Inputs:
+	与MATLAB参数同名
+Outputs:
+	返回0：正常；
+	返回1：错误，没有找到大于阈值的峰；
+	返回9：PSTR_FCCH_receiver_parameter->I_Params_FCCH_num_to_sample过小；
+
+Notes: 
+**************************************************************************/
+
+int CMS_FCCH_receiver( double *PD_in_chirp_sig_real_part, double *PD_in_chirp_sig_imag_part, int I_info_len, FCCH_Receiver_Para *PSTR_FCCH_receiver_parameter)
+{
+
+	int I_FFT_N = PSTR_FCCH_receiver_parameter->I_Params_FCCH_FFT_N;
+	int I_sample_group_num = PSTR_FCCH_receiver_parameter->I_Params_FCCH_num_to_sample;
+	int I_os = PSTR_FCCH_receiver_parameter->I_Params_os/I_sample_group_num;
+	int I_params_interp_os = PSTR_FCCH_receiver_parameter->I_Params_os;
+	int I_SlotsPerFrame = PSTR_FCCH_receiver_parameter->I_Params_SlotsPerFrame;
+	int I_SymsPerSlot = PSTR_FCCH_receiver_parameter->I_Params_SymsPerSlot;
+	int I_basic_rate = PSTR_FCCH_receiver_parameter->I_Params_basic_rate;
+	double D_SlotTime = PSTR_FCCH_receiver_parameter->D_Params_SlotTime;
+	double *PD_State_freqs_offset = PSTR_FCCH_receiver_parameter->PD_State_FCCH_freqs_offset;
+	double *PD_State_sample_offset = PSTR_FCCH_receiver_parameter->PD_State_FCCH_sample_offset;
+	double *PD_State_time_offset = PSTR_FCCH_receiver_parameter->PD_State_FCCH_time_offset;
+	int	   *PI_State_receive_num = PSTR_FCCH_receiver_parameter->PI_State_FCCH_receive_num;
+	double D_T = (double)1/I_basic_rate;
+	double D_time_lag = PSTR_FCCH_receiver_parameter->D_Params_FCCH_time_lag;
+	double PD_pos_group_sig_real_part[4096] = {0};
+	double PD_pos_group_sig_imag_part[4096] = {0};
+	double PD_neg_group_sig_real_part[4096] = {0};
+	double PD_neg_group_sig_imag_part[4096] = {0};
+	double PD_fft_sqr[4096];
+	double D_peak_sum;
+	double D_all_sum;
+	double D_Rsn;
+	double D_new_freqs_offset = 0;
+	double D_new_sample_offset = 0;
+	int I_jump_index;
+	int I_f1,I_f2;
+	double D_fft_max;
+	int B_break_flag = 0;
+	int i,j;
+
+	/* D_group_sig1长度为14400/I_sample_group_num */
+	if (I_sample_group_num < 5 || I_FFT_N > 4096)
+	{
+		return 9;
+	}
+	
+
+	for (i=0; i<(floor((I_SlotsPerFrame-FCCH_SLOT_NUM)*D_SlotTime/D_time_lag)+1); i++)
+	{
+		/*解正扫频*/
+		I_jump_index = (int)(D_time_lag*I_basic_rate*I_os*i);
+		for(j=0; j<(I_SymsPerSlot*I_os*FCCH_SLOT_NUM); j++)
+		{
+			PD_pos_group_sig_real_part[j] = Re_cpl_mul((PD_in_chirp_sig_real_part[j+I_jump_index]),(PD_in_chirp_sig_imag_part[j+I_jump_index]),(PSTR_FCCH_receiver_parameter->PD_Params_FCCH_pos_sweep_wind_real_part[j]),(PSTR_FCCH_receiver_parameter->PD_Params_FCCH_pos_sweep_wind_imag_part[j]));
+			PD_pos_group_sig_imag_part[j] = Im_cpl_mul(PD_in_chirp_sig_real_part[j+I_jump_index],PD_in_chirp_sig_imag_part[j+I_jump_index],PSTR_FCCH_receiver_parameter->PD_Params_FCCH_pos_sweep_wind_real_part[j],PSTR_FCCH_receiver_parameter->PD_Params_FCCH_pos_sweep_wind_imag_part[j]);
+		}
+		
+		/*求峰值*/
+		CSM_FFT(PD_pos_group_sig_real_part,PD_pos_group_sig_imag_part,I_FFT_N,0);
+		for(j=0; j<I_FFT_N; j++)
+		{
+			PD_fft_sqr[j] = my_sqr(PD_pos_group_sig_real_part[j],PD_pos_group_sig_imag_part[j]);
+			PD_pos_group_sig_real_part[j] = 0;
+			PD_pos_group_sig_imag_part[j] = 0;
+		}
+		D_fft_max = 0;
+		D_all_sum = 0;
+		for(j=0; j<I_FFT_N; j++)
+		{
+			if (PD_fft_sqr[j] > D_fft_max)
+			{
+				D_fft_max = PD_fft_sqr[j];
+				I_f1 = j;
+			}
+			D_all_sum += PD_fft_sqr[j];
+		}
+
+		/*求Rsn*/
+		D_peak_sum = 0;
+		for(j=0; j<FCCH_SUM_PEAK_NUM; j++)
+		{
+			D_peak_sum += PD_fft_sqr[min(max(I_f1+j-(FCCH_SUM_PEAK_NUM-1)/2,0),4095)];		
+		}
+		D_Rsn = D_peak_sum / max((D_all_sum-D_peak_sum),1e-8);
+		
+		
+		if (D_Rsn > PSTR_FCCH_receiver_parameter->D_Params_FCCH_R_threshold)
+		{
+			/*解负扫频*/
+			for(j=0; j<(I_SymsPerSlot*I_os*FCCH_SLOT_NUM); j++)
+			{
+				PD_neg_group_sig_real_part[j] = Re_cpl_mul((PD_in_chirp_sig_real_part[j+I_jump_index]),(PD_in_chirp_sig_imag_part[j+I_jump_index]),(PSTR_FCCH_receiver_parameter->PD_Params_FCCH_pos_sweep_wind_real_part[j]),-(PSTR_FCCH_receiver_parameter->PD_Params_FCCH_pos_sweep_wind_imag_part[j]));
+				PD_neg_group_sig_imag_part[j] = Im_cpl_mul(PD_in_chirp_sig_real_part[j+I_jump_index],PD_in_chirp_sig_imag_part[j+I_jump_index],PSTR_FCCH_receiver_parameter->PD_Params_FCCH_pos_sweep_wind_real_part[j],-PSTR_FCCH_receiver_parameter->PD_Params_FCCH_pos_sweep_wind_imag_part[j]);
+			}
+
+			/*求峰值*/
+			CSM_FFT(PD_neg_group_sig_real_part,PD_neg_group_sig_imag_part,I_FFT_N,0);
+			for(j=0; j<I_FFT_N; j++)
+			{
+				PD_fft_sqr[j] = my_sqr(PD_neg_group_sig_real_part[j],PD_neg_group_sig_imag_part[j]);		
+			}
+			D_fft_max = 0;
+			for(j=0; j<I_FFT_N; j++)
+			{
+				if (PD_fft_sqr[j] > D_fft_max)
+				{
+					D_fft_max = PD_fft_sqr[j];
+					I_f2 = j;
+				}
+			}
+		}
+		else
+		{
+			continue;
+		}
+
+		/*求频偏*/
+		if (I_f1+1 > I_FFT_N/2)
+		{
+			I_f1 -= I_FFT_N;
+		}
+		if (I_f2+1 > I_FFT_N/2)
+		{
+			I_f2 -= I_FFT_N;
+		}
+
+		/*计算时差频偏*/
+		D_new_freqs_offset =  ((double)(I_f1+I_f2)/2.0)/(I_FFT_N*D_T/I_os);
+		D_new_sample_offset = (double)(I_f1-I_f2)/I_FFT_N/0.96*I_params_interp_os/2*I_os*I_params_interp_os/I_sample_group_num + (double)D_time_lag*I_basic_rate*i*I_params_interp_os/I_sample_group_num;
+		
+		/*alpha滤波*/
+		*PD_State_freqs_offset = *PD_State_freqs_offset + PSTR_FCCH_receiver_parameter->D_Params_FCCH_freq_alpha*D_new_freqs_offset; /*单位 Hz*/
+		*PD_State_sample_offset = *PD_State_sample_offset + PSTR_FCCH_receiver_parameter->D_Params_FCCH_time_alpha*D_new_sample_offset;
+		*PD_State_time_offset = *PD_State_sample_offset/((double)I_params_interp_os/I_sample_group_num)/(double)I_basic_rate; /*单位 秒*/
+
+		(*PI_State_receive_num)++;
+
+		B_break_flag = 1;
+		break;
+	}
+
+	if (B_break_flag == 0)
+	{
+		return 1;
+	}
+
+
+	return 0;
+}
+
+
+int CSM_de_CDBPSK(double *PI_in_de_CDBPSK_real_part, double *PI_in_de_CDBPSK_imag_part, int I_info_len, double D_noise_sigma, double *PD_out_de_LLR)
+{
+	int i;
+	double D_neg_real_part = 0.707106781186548;
+	double D_neg_imag_part = -0.707106781186548;
+	double D_cal_result_real = 0;
+	double D_cal_result_imag = 0;
+	double D_cal_reg;
+
+	for (i=1; i<I_info_len; i++)
+	{
+		D_cal_result_real = Re_cpl_mul(PI_in_de_CDBPSK_real_part[i], PI_in_de_CDBPSK_imag_part[i], D_neg_real_part, D_neg_imag_part);
+		D_cal_result_imag = Im_cpl_mul(PI_in_de_CDBPSK_real_part[i], PI_in_de_CDBPSK_imag_part[i], D_neg_real_part, D_neg_imag_part);
+		D_cal_reg = -Re_cpl_mul(D_cal_result_real, D_cal_result_imag, PI_in_de_CDBPSK_real_part[i-1], -PI_in_de_CDBPSK_imag_part[i-1]);
+		PD_out_de_LLR[i-1] = 2*D_cal_reg/max(1e-6,pow(D_noise_sigma,2)+pow(D_noise_sigma,4)/4);
+	}
+
+	return 0;
+}
+
+int CSM_CDBPSK(int *PI_in_CDBPSK, int I_info_len, double *PD_out_CDBPSK_real_part, double *PD_out_CDBPSK_imag_part)
+{
+	int index = 4;
+	int I_diff_reg = 0;
+	int i;
+	double PD_exp_table_real_part[8] = {1, 0.707106781186548, 0, -0.707106781186548, -1, -0.707106781186548,  0,  0.707106781186547};
+	double PD_exp_table_imag_part[8] = {0, 0.707106781186548, 1,  0.707106781186548,  0, -0.707106781186548, -1, -0.707106781186548};
+
+	for (i=0; i<I_info_len; i++)
+	{
+		index += 4*PI_in_CDBPSK[i];
+		index %= 8;
+		PD_out_CDBPSK_real_part[i] = PD_exp_table_real_part[index];
+		PD_out_CDBPSK_imag_part[i] = PD_exp_table_imag_part[index];
+		index++;
+	}
+
+	return 0;
+}
+
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_RS_dec;
+Function Description:
+	RS译码函数
+Inputs:
+	PI_RS_dec_in; RS码输入，15位
+	PI_RS_dec_out; RS码输出，9位
+Outputs:
+	返回0;正常;
+	返回1;gf_eval返回错误;
+	返回2;mul_poly_gf返回错误;
+	返回3;rs_bm返回错误;
+	返回4;rs_bm返回错误;
+	返回5;I_mul_poly_gf_out_len过长;
+	返回6;可纠错数目不足;
+	返回7;rs_forney返回错误;
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_RS_dec(int *PI_RS_dec_in, int *PI_RS_dec_out)
+{
+	int i,j;
+	int func_result;
+	int I_error_num = 0;
+	int PI_tmp_RS_code[RS_IN_CODE_NUM];
+	int PI_syndrome[SYNDROME_LEN] = {0};
+	int PI_params_r[SYNDROME_LEN] = {2,4,8,3,6,12};
+	int PI_mul_poly_gf_out[20] = {0};
+	int I_mul_poly_gf_out_len;
+	int PI_new_locator[20];
+	int I_new_locator_len;
+	int PI_locator[20];
+	int I_locator_len;
+	int I_num_error;
+	int PI_Params_gf_nz[15] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
+	int I_Params_gf_nz_len = 15;
+	int PI_rs_chien[15];
+	int PI_nulls[20];
+	int I_nulls_len;
+	int PI_data_corrected[20];
+	int gf_mul[256] = {	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+						0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,
+						0,2,4,6,8,10,12,14,3,1,7,5,11,9,15,13,
+						0,3,6,5,12,15,10,9,11,8,13,14,7,4,1,2,
+						0,4,8,12,3,7,11,15,6,2,14,10,5,1,13,9,
+						0,5,10,15,7,2,13,8,14,11,4,1,9,12,3,6,
+						0,6,12,10,11,13,7,1,5,3,9,15,14,8,2,4,
+						0,7,14,9,15,8,1,6,13,10,3,4,2,5,12,11,
+						0,8,3,11,6,14,5,13,12,4,15,7,10,2,9,1,
+						0,9,1,8,2,11,3,10,4,13,5,12,6,15,7,14,
+						0,10,7,13,14,4,9,3,15,5,8,2,1,11,6,12,
+						0,11,5,14,10,1,15,4,7,12,2,9,13,6,8,3,
+						0,12,11,7,5,9,14,2,10,6,1,13,15,3,4,8,
+						0,13,9,4,1,12,8,5,2,15,11,6,3,14,10,7,
+						0,14,15,1,13,3,2,12,9,7,6,8,4,10,11,5,
+						0,15,13,2,9,6,4,11,1,14,12,3,8,7,5,10};
+	int gf_inv[16] = {1,1,9,14,13,11,7,6,15,2,12,5,10,4,3,8};
+
+	for (i=0; i<RS_OUT_CODE_NUM; i++)
+	{
+		PI_RS_dec_out[i] = PI_RS_dec_in[i];
+	}
+
+	for (i=0; i<RS_IN_CODE_NUM; i++)
+	{
+		PI_tmp_RS_code[i] = PI_RS_dec_in[RS_IN_CODE_NUM-1-i];
+	}
+
+	func_result = gf_eval(PI_tmp_RS_code, RS_IN_CODE_NUM, PI_params_r, SYNDROME_LEN, PI_syndrome);
+	
+	if (func_result != 0)
+	{
+		return 1;
+	}
+
+	for (i=0; i<SYNDROME_LEN; i++)
+	{
+		if (PI_syndrome[i] != 0)
+		{
+			I_error_num = 1;
+		}
+	}
+
+
+	if (I_error_num == 0)
+	{
+		return 0;
+	}
+	else
+	{
+		func_result = 1;
+		func_result = mul_poly_gf(PI_syndrome, SYNDROME_LEN, PI_mul_poly_gf_out, &I_mul_poly_gf_out_len);
+		if (func_result != 0)
+		{
+			return 2;
+		}
+		for (i=0; i<I_mul_poly_gf_out_len; i++)
+		{
+			PI_mul_poly_gf_out[I_mul_poly_gf_out_len-i] = PI_mul_poly_gf_out[I_mul_poly_gf_out_len-1-i];
+		}
+		PI_mul_poly_gf_out[0] = 1;
+		if (I_mul_poly_gf_out_len > 8)
+		{
+			return 5;
+		}
+		func_result = rs_bm(PI_mul_poly_gf_out, I_mul_poly_gf_out_len, PI_locator, &I_locator_len, &I_num_error);
+		if (func_result != 0)
+		{
+			return func_result;
+		}
+		for(i=0 ; i<I_locator_len; i++)
+		{
+			func_result = mul_poly_gf(PI_locator, I_locator_len, PI_new_locator, &I_new_locator_len);
+		}
+		if (func_result != 0)
+		{
+			return func_result;
+		}
+		func_result = gf_eval(PI_new_locator, I_new_locator_len, PI_Params_gf_nz, I_Params_gf_nz_len, PI_rs_chien);
+		if (func_result != 0)
+		{
+			return 1;
+		}
+		for (i=0,j=0; i<I_Params_gf_nz_len; i++)
+		{
+			if (PI_rs_chien[i] == 0)
+			{
+				PI_nulls[j] = i+1;
+				j++;
+			}
+		}
+		I_nulls_len = j;
+		if (I_nulls_len != I_num_error)
+		{
+			return 6;
+		}
+		
+
+		func_result = rs_forney(PI_RS_dec_in, PI_syndrome, PI_new_locator, I_new_locator_len, I_num_error, PI_nulls, I_nulls_len, PI_data_corrected);
+		if (func_result != 0)
+		{
+			return 7;
+		}
+		for (i=0; i<RS_OUT_CODE_NUM; i++)
+		{
+			PI_RS_dec_out[i] = PI_data_corrected[i];
+		}
+
+	}
+
+	return 0;
+
+}
+
+
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	CSM_bach_cor;
+Function Description:
+	BACH相关函数
+Inputs:
+	PD_sig_in_real_part; 信号实部输入数组指针，108位；
+	PD_sig_in_imag_part; 信号虚部输入数组指针，108位；
+	PD_RS_mod_real_part; RS码扩频信号实部指针，108*16位，每108位为单位RS码扩频信号，共16种；
+	PD_RS_mod_imag_part; RS码扩频信号虚部指针，108*16位，每108位为单位RS码扩频信号，共16种；
+	I_RS_code		   ; 输出的一位RS码；
+	D_cor_peak		   ; RS码相应的相关峰值；
+Outputs:
+	返回0;正常;
+	返回1;输入信号过小;
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+int CSM_bach_cor(double *PD_sig_in_real_part, double *PD_sig_in_imag_part, double *PD_RS_mod_real_part, double *PD_RS_mod_imag_part, int *I_RS_code, double *D_cor_peak)
+{
+	int i,j;
+	int I_temp_RS_code;
+	double D_temp_cor_peak;
+	double D_cor_sqr_result;
+	double D_cor_real_result;
+	double D_cor_imag_result;
+	
+
+	D_temp_cor_peak = 0;
+	for(i=0; i<RS_TYPE_NUM; i++)
+	{
+		D_cor_real_result = 0;
+		D_cor_imag_result = 0;
+		for(j=0; j<RS_SYM_NUM; j++)
+		{
+			D_cor_real_result += Re_com_conj_mul(PD_sig_in_real_part[j],PD_sig_in_imag_part[j],PD_RS_mod_real_part[j+i*RS_SYM_NUM],PD_RS_mod_imag_part[j+i*RS_SYM_NUM]);
+			D_cor_imag_result += Im_com_conj_mul(PD_sig_in_real_part[j],PD_sig_in_imag_part[j],PD_RS_mod_real_part[j+i*RS_SYM_NUM],PD_RS_mod_imag_part[j+i*RS_SYM_NUM]);
+		}
+		D_cor_sqr_result = my_sqr(D_cor_real_result,D_cor_imag_result);
+		
+		if (D_cor_sqr_result > D_temp_cor_peak)
+		{
+			D_temp_cor_peak = D_cor_sqr_result;
+			I_temp_RS_code = i;
+		}
+	}
+
+	*I_RS_code = I_temp_RS_code;
+	if (D_temp_cor_peak > 1e-3)
+	{
+		*D_cor_peak = sqrt(D_temp_cor_peak);
+	}
+	else
+	{
+		return 1;
+	}
+
+
+	return 0;
+
+}
+
+int CSM_dkab_receive(double *PD_in_dkab_real, double *PD_in_dkab_imag, double *PD_out_dkab_real, double *PD_out_dkab_imag, int I_in_info_len, int I_rx_ov, int I_p, int I_inter, double *PI_out_rate)
+{
+	int i,j;
+	int rx_sig_len = I_in_info_len/I_rx_ov;
+	int ss_sig_len = 16;
+	double PD_ss_pow[12] = {0};
+	double PD_rx_pow[12] = {0};
+	double PD_rate[12] = {0};
+	double PD_ss_sig_real[200];
+	double PD_ss_sig_imag[200];
+	double PD_rx_sig_real[2400];
+	double PD_rx_sig_imag[2400];
+	double PD_tmp_rate[12];
+
+	double tmp = 0;
+	for (i=0; i<I_rx_ov; i++)
+	{
+		for (j=0; j<ss_sig_len/2; j++)
+		{
+			PD_ss_sig_real[ss_sig_len*i+j] = PD_in_dkab_real[(3+I_p/2)*I_rx_ov-I_rx_ov/2-1+i+I_rx_ov*j];
+			PD_ss_sig_real[ss_sig_len*i+ss_sig_len/2+j] = PD_in_dkab_real[(3+I_p/2+8+I_inter)*I_rx_ov-I_rx_ov/2-1+i+I_rx_ov*j];
+			PD_ss_sig_imag[ss_sig_len*i+j] = PD_in_dkab_imag[(3+I_p/2)*I_rx_ov-I_rx_ov/2-1+i+I_rx_ov*j];
+			PD_ss_sig_imag[ss_sig_len*i+ss_sig_len/2+j] = PD_in_dkab_imag[(3+I_p/2+8+I_inter)*I_rx_ov-I_rx_ov/2-1+i+I_rx_ov*j];
+		}
+		for (j=0; j<ss_sig_len; j++)
+		{
+			PD_ss_pow[i] = PD_ss_pow[i] + sqrt(PD_ss_sig_real[ss_sig_len*i+j]*PD_ss_sig_real[ss_sig_len*i+j] + PD_ss_sig_imag[ss_sig_len*i+j]*PD_ss_sig_imag[ss_sig_len*i+j]);
+		}
+		for (j=0; j<rx_sig_len; j++)
+		{
+			PD_rx_sig_real[rx_sig_len*i+j] = PD_in_dkab_real[i+I_rx_ov*j];
+			PD_rx_sig_imag[rx_sig_len*i+j] = PD_in_dkab_imag[i+I_rx_ov*j];
+			PD_rx_pow[i] = PD_rx_pow[i] + sqrt(PD_rx_sig_real[rx_sig_len*i+j]*PD_rx_sig_real[rx_sig_len*i+j] + PD_rx_sig_imag[rx_sig_len*i+j]*PD_rx_sig_imag[rx_sig_len*i+j]);
+		}
+		PI_out_rate[i] = PD_ss_pow[i]/PD_rx_pow[i];
+		PD_tmp_rate[i] = PI_out_rate[i];
+	}
+	for (i=0; i<I_rx_ov; i++)
+	{
+		for(j=0; j<I_rx_ov-i; j++)
+		{
+			if (PI_out_rate[j]<PI_out_rate[j+1])
+			{
+				tmp = PI_out_rate[j];
+				PI_out_rate[j] = PI_out_rate[j+1];
+				PI_out_rate[j+1] = tmp;
+			}
+		}
+	}
+	for(i=0; i<I_rx_ov; i++)
+	{
+		if (PI_out_rate[0] == PD_tmp_rate[i])
+		{
+			for (j=0; j<ss_sig_len; j++)
+			{
+				PD_out_dkab_real[j] = PD_ss_sig_real[ss_sig_len*i+j];
+				PD_out_dkab_imag[j] = PD_ss_sig_imag[ss_sig_len*i+j];
+			}
+		}
+	}
+
+	return 0;
+}
+
+int CSM_CBPSK(int *PI_in_CBPSK, int I_info_len, double *PD_out_real, double *PD_out_imag)
+{
+	int temp;
+	int i;
+	double D_complex_symbol_real_part[4] = {1.0,0.0,-1.0,0.0};
+	double D_complex_symbol_imag_part[4] = {0.0,1.0,0.0,-1.0};
+	for (i=0;i<I_info_len;i++)
+	{
+		PD_out_real[i] = D_complex_symbol_real_part[(2*PI_in_CBPSK[i]+i)&3];
+		PD_out_imag[i] = D_complex_symbol_imag_part[(2*PI_in_CBPSK[i]+i)&3];
+	}
+}

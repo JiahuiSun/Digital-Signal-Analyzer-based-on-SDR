@@ -1,0 +1,88 @@
+#include <stdio.h>
+#include <string.h>
+#include <malloc.h>
+#include <time.h>
+
+#include "type_CSM.h"
+
+#pragma once
+
+#ifndef _FUNC_CSM_H
+#define _FUNC_CSM_H
+
+/***********************************************
+					 函数声明
+************************************************/
+
+
+/*加*/
+int ADD_cpl(Double_Complex *C_result,Double_Complex *C_add1,Double_Complex *C_add2);
+
+/*减*/
+int MINUS_cpl(Double_Complex *C_result,Double_Complex *C_minus1,Double_Complex *C_minus2);
+
+/*积*/
+int MUL_cpl(Double_Complex *C_result,Double_Complex *C_mul1,Double_Complex *C_mul2);
+
+/*商*/
+int DIV_cpl(Double_Complex *C_result,Double_Complex *C_div1,Double_Complex *C_div2);
+
+/*复指数*/
+int EXP_cpl(Double_Complex *C_result,Double_Complex *C_exp);
+
+/*平方*/
+int SQR_cpl(Double_Complex *C_result,Double_Complex *C_sqr);
+
+/*模平方*/
+int MOD_SQR_cpl(d_type D_result,Double_Complex *C_in);
+
+/*单次整数倍内插*/
+int CSM_interp_once(d_type *PD_in_interp_once, int I_in_info_len, d_type *PD_out_interp_once, int *PI_out_info_len, d_type *PD_filter_coef, int I_filter_coef_len, int I_interp_multiple);
+
+/*6PSK调制*/
+int CSM_6PSK(int *PI_in_6PSK,d_type *PD_out_6PSK_real_part,d_type *PD_out_6PSK_imag_part,int I_info_len);
+
+/*抽取子函数*/
+int my_filter(d_type *b,d_type *a,d_type *x,d_type *zi,d_type *zo,d_type *y,int order,int data_len);
+
+/*Viterbi译码*/
+int ViterbiDecode(d_type *g_array, d_type *input_c, int CodeLength, int nn, int KK, int code_type, int DEPTH, int *output_u_int);
+
+/*Viterbi译码子函数*/
+void itob(int binvec_p[], int symbol, int length);
+int parity_counter(int symbol, int length);
+int nsc_enc_bit(int state_out_p[], int input, int state_in, int  g[], int  KK, int nn);
+int rsc_enc_bit(int	state_out_p[], int input, int state_in, int g[], int KK, int nn);
+void nsc_transit(int output_p[],int	trans_p[], int input, int g[], int KK, int nn);
+void rsc_transit(int output_p[], int trans_p[], int	input, int g[], int KK, int nn);
+void rsc_tail(int tail_p[], int g[], int max_states, int mm);
+void conv_encode(int output_p[], int input[], int out0[], int state0[], int	out1[], int	state1[], int tail[], int KK, int LL, int nn);
+d_type Gamma(d_type rec_array[], int symbol, int nn);
+void Viterbi(int output_u_int[], int out0[], int state0[], int out1[], int state1[], float input_c[], int KK, int nn, int LL);
+void ViterbiTb(int output_u_int[], int out0[], int state0[], int out1[], int state1[], float input_c[], int KK, int nn, int LL, int	depth);
+
+/*turbo编码子函数*/
+int interleaver(int *data_in, int code_length,int *data_out);
+int rsc_encoder(int code_memory, int denominator, int numerator, int tailed, int code_length, int *x_in, int *x_out, int *y_out, int *tails_out);
+int rate_matching(int *PI_info, int I_info_len, int *PI_pattern, int I_pattern_len,int *PI_out_rate_matching, int I_out_len);
+
+/*turbo译码子函数*/
+int de_rate_matching(d_type *PD_in_de_rate_matching, int I_in_de_rate_len, d_type *PD_out_info, int I_out_info_len, d_type *PD_out_pattern, int I_out_pattern_len, int I_likely_mod);
+
+
+/*turbo译码子函数*/
+int interleaver_d_type(d_type *data_in, int code_length,d_type *data_out);
+int deinterleaver(d_type *data_in, int code_length,d_type *data_out);
+int rsc_decoder(int code_memory,int denominator,int numerator,int tailed,int parity_so,int code_length, d_type *x_in, d_type *y_in, d_type *tails_in,d_type *LL_out,d_type *xe_out,d_type *ye_out);
+int sign(d_type x);
+int	Llimiter(d_type *x,int length, d_type Lmax,d_type *y);
+int	decision(d_type *x,int length,int *y);
+int	de_crc_check(int *re_u,int *G,int *re_d,int length_G,int length_re_u);
+
+/*FFT*/
+void swap(int i,int j,d_type *z);
+void bitrev(int n,d_type *x,d_type *y);
+
+
+
+#endif

@@ -1,0 +1,32 @@
+#include <math.h>
+#include "type_CSM.h"
+
+int norm_signal(d_type *PD_in_real, d_type *PD_in_imag, int I_in_len, int I_mean_len)
+{
+	int	i;
+	int	mid_idx;
+	d_type	D_sig_square = 0;
+	d_type	D_sig_square_sum = 0;
+	d_type	D_mean_amp;
+	d_type  tmp;
+
+	mid_idx = floor(I_in_len/2);
+
+	for(i=mid_idx-I_mean_len/2; i<mid_idx+I_mean_len/2; i++)
+	{
+		D_sig_square = PD_in_real[i]*PD_in_real[i] + PD_in_imag[i]*PD_in_imag[i];
+		D_sig_square_sum += D_sig_square;
+	}
+
+	D_mean_amp = sqrt(D_sig_square_sum/I_mean_len);
+
+	for(i=0; i<I_in_len; i++)
+	{	
+		tmp = PD_in_real[i]/D_mean_amp;
+		PD_in_real[i] = tmp
+		tmp = PD_in_imag[i]/D_mean_amp;
+		PD_in_imag[i] = tmp
+	}
+
+	return 0;
+}

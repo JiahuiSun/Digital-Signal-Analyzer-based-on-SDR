@@ -1,0 +1,8 @@
+#include <stdio.h>
+//#include <math.h>
+#include <tgmath.h>
+#include <string.h>
+#include <malloc.h>
+#include <stdlib.h>
+
+int modulate(int *PI_in_mod,d_type *PD_out_mod_real_part,d_type *PD_out_mod_imag_part,int I_info_len , int I_mod_order);

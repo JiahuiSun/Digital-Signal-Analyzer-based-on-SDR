@@ -1,0 +1,8 @@
+#include "func_CSM.h"
+#include "type_CSM.h"
+
+//int turbo_dec(d_type *PD_in_turbo_dec, int I_decoded_info_len, int *PI_out_turbo_dec, int *PI_out_turbo_dec_len, int I_code_memory,int I_denominator,int I_numerator,int I_tailed,
+//			  int I_parity_so, int *G, int len_G,int Tc_iteration_num, int RACH_SB_MAK_MAP,int *RACH_SB_MAK);
+
+int air_turbo_dec(d_type *PD_in_turbo_dec, int I_source_info_len, int I_actual_info_length, int *PI_out_turbo_dec , int I_code_memory,int I_denominator,int I_numerator,int I_tailed,
+			  int I_parity_so,int Tc_iteration_num , d_type D_tc_max);

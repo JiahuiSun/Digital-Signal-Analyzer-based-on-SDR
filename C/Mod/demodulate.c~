@@ -1,0 +1,53 @@
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	demodulate;
+Function Description:
+	对信息序列进行QPSK or DPSK解调;
+Inputs:
+	PD_in_mod_real_part	：输入待QPSK解调实部信息序列数组指针,PD_in_mod_real_part[0]为最高位;
+	PD_in_mod_imag_part	：输出待QPSK解调虚部信息序列数组指针,PD_in_mod_imag_part[0]为最高位;
+	PI_out_LLR_de_mod	：待解调信息序列数组指针,PI_out_de_mod[0]为最高位;
+	I_info_len			: 信息序列数组PI_out_de_mod长度;
+	I_mod_flag			: 调制符："1"QPSK,  "0"DPSK;
+Outputs:
+	返回0:正常;1:信息序列长度错误;
+Notes: 本函数调用的函数清单及其他
+***********************************************************/
+#include "demodulate.h"
+
+int demodulate(double *PD_in_mod_real_part, double *PD_in_mod_imag_part, double *PD_out_LLR_de_mod, int I_info_len, double D_sigma_sqr,int I_mod_flag)
+{
+	int i,j;
+	double D_LLR_low_de_QPSK = 0;
+	double D_LLR_high_de_QPSK = 0;
+	
+	/*如果长度不正确*/
+	if (I_info_len%2 != 0)
+	{
+		return 1;
+	}
+	/*长度正确*/
+	else
+	{
+		if(I_mod_flag)
+		{
+			/*计算LLR*/
+			for(i=0,j=0; i<I_info_len/2; j+=2,i++)
+			{
+				//PD_out_LLR_de_mod[j]   = -1.41421*PD_in_mod_real_part[i] / D_sigma_sqr;
+				//PD_out_LLR_de_mod[j+1] = -1.41421*PD_in_mod_imag_part[i] / D_sigma_sqr;
+				PD_out_LLR_de_mod[j]   = -2*PD_in_mod_real_part[i] / D_sigma_sqr;
+				PD_out_LLR_de_mod[j+1] = -2*PD_in_mod_imag_part[i] / D_sigma_sqr;
+			}
+		}
+		else
+		{
+			for(i=0; i<I_info_len; i++)
+				//PD_out_LLR_de_mod[i]=-PD_in_mod_real_part[i]/ D_sigma_sqr;
+				PD_out_LLR_de_mod[i]=-2*PD_in_mod_real_part[i]/ D_sigma_sqr;
+		}
+		return 0;
+	}
+}

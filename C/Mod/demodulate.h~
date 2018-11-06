@@ -1,0 +1,2 @@
+#include "type_CSM.h"
+int demodulate(double *PD_in_mod_real_part, double *PD_in_mod_imag_part, double *PD_out_LLR_de_mod, int I_info_len, double D_sigma_sqr,int I_mod_flag);

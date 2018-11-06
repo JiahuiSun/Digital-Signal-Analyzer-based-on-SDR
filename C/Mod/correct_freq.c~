@@ -1,0 +1,38 @@
+/***********************************************************
+Company Name:
+	清华大学无线中心;
+Function Name:
+	correct_freq;
+Function Description:
+	纠频偏;
+Inputs:
+	PD_in_ds_sig_real		:	输入信息序列实部指针；
+	PD_in_ds_sig_imag		：	输入信息序列虚部指针；	
+	PD_out_cf_sig_real		：	输出信息序列实部指针；
+	PD_out_cf_sig_imag		：	输出信息序列虚部指针；
+	I_ds_sig_len			：	输入信息序列长度；
+	d_cfo				：	cfo；			
+Outputs:
+	返回0:正常;
+	
+Notes:
+***********************************************************/
+
+#include "correct_freq.h"
+
+
+int correct_freq (d_type *PD_in_ds_sig_real, d_type *PD_in_ds_sig_imag,d_type *PD_out_cf_sig_real,d_type *PD_out_cf_sig_imag,
+	int I_ds_sig_len, d_type d_cfo)
+{
+	int i;
+	d_type I_cfo_cor;
+	
+	for(i=0;i<I_ds_sig_len;i++)
+	{
+		I_cfo_cor=fmodf(d_cfo*(i+1),(2*DOUBLE_PI));
+		PD_out_cf_sig_real[i]=Re_cpl_mul(PD_in_ds_sig_real[i],PD_in_ds_sig_imag[i],cos(-I_cfo_cor),sin(-I_cfo_cor));
+		PD_out_cf_sig_imag[i]=Im_cpl_mul(PD_in_ds_sig_real[i],PD_in_ds_sig_imag[i],cos(-I_cfo_cor),sin(-I_cfo_cor));
+	}
+
+	return 0;
+}
